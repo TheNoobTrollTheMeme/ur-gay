@@ -137,6 +137,32 @@ def attack_points(path):
     return move_points + [place_points[1]]
 
 
+def validate_target(positions):
+    for joint, value in positions.items():
+        angle = position_to_angle(joint, value)
+        lo, hi = settings.ANGLE_LIMITS[joint]
+        if not lo <= angle <= hi:
+            raise ValueError(f'{joint} exceeds configured angle limits')
+
+
+def live_attack_targets(path):
+    """Read saved edits before EVERY command; never cache withdrawal coordinates."""
+    index = 0
+    while True:
+        _, current = wp.load_sequence(path)
+        if index >= len(current):
+            break
+        target = current[index]
+        validate_target(target)
+        yield f'{path.stem} waypoint {index + 1} (live)', target
+        index += 1
+    paired = path.with_name(path.stem[:-1] + 'p.json')
+    _, current = wp.load_sequence(paired)
+    target = current[1]
+    validate_target(target)
+    yield f'{paired.stem} waypoint 2 WITHDRAW (live)', target
+
+
 def test_grid(attack=False):
     if attack:
         routes = [(p, d) for p, d in wp.find_sequences() if p.stem.endswith('m')]
@@ -191,10 +217,14 @@ def test_grid(attack=False):
                         return
                     if key == 'r':
                         break
-                for i, positions in enumerate(points, 1):
+                targets = live_attack_targets(path) if attack else (
+                    (f'{path.stem}: waypoint {i}/{len(points)}', point)
+                    for i, point in enumerate(points, 1)
+                )
+                for label, positions in targets:
                     if stopped(terminal):
                         return
-                    print(f'\r\n{path.stem}: waypoint {i}/{len(points)}', flush=True)
+                    print(f'\r\n{label}', flush=True)
                     move_all_sync(handler, positions, speed=300, acceleration=20)
                     if not wait_move(handler, terminal):
                         return
@@ -211,7 +241,7 @@ def test_grid(attack=False):
 
 def main():
     while True:
-        answer = input('\n1 Live record/replace  2 Random grid placement test  3 Attack + withdraw  Q Quit: ').strip().lower()
+        answer = input('\n1 Live record/replace  2 Random grid placement test  3 LIVE attack + withdraw  Q Quit: ').strip().lower()
         try:
             if answer == 'q':
                 return
