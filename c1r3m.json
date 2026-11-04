@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "type": "pose_sequence",
+  "name": "c1r3m",
+  "input_type": "raw",
+  "description": "OFFLINE SIMULATION ONLY. ESTIMATED GEOMETRY AND ZERO OFFSETS. NOT CLEARED FOR HARDWARE EXECUTION.",
+  "joint_order": [
+    {
+      "servo_id": 1,
+      "joint": "base_yaw"
+    },
+    {
+      "servo_id": 2,
+      "joint": "shoulder"
+    },
+    {
+      "servo_id": 3,
+      "joint": "elbow"
+    },
+    {
+      "servo_id": 4,
+      "joint": "wrist"
+    },
+    {
+      "servo_id": 5,
+      "joint": "gripper"
+    }
+  ],
+  "points": [
+    {
+      "input_values": [
+        "2253",
+        "1818",
+        "1837",
+        "1766",
+        "2601"
+      ]
+    },
+    {
+      "input_values": [
+        "2223",
+        "1470",
+        "2199",
+        "2040",
+        "2791"
+      ]
+    }
+  ]
+}
