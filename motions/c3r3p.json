@@ -2,8 +2,8 @@
   "schema_version": 1,
   "type": "pose_sequence",
   "name": "c3r3p",
+  "description": "UNVERIFIED SIMULATION ONLY; c3r3 place. DO NOT EXECUTE ON THE ROBOT WITHOUT CALIBRATION.",
   "input_type": "raw",
-  "description": "UNVERIFIED C3R3 BOTTOM RIGHT: JOINT-SPACE EXTRAPOLATION FROM OTHER ESTIMATES. PRIOR KINEMATIC MODEL REPORTED TARGET UNREACHABLE. SIMULATION USE ONLY; NOT CLEARED FOR ROBOT.",
   "joint_order": [
     {
       "servo_id": 1,

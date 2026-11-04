@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "type": "pose_sequence",
-  "name": "c3r3m",
+  "name": "c3r2m",
+  "description": "UNVERIFIED SIMULATION ONLY; c3r2 move. DO NOT EXECUTE ON THE ROBOT WITHOUT CALIBRATION.",
   "input_type": "raw",
-  "description": "UNVERIFIED C3R3 BOTTOM RIGHT: JOINT-SPACE EXTRAPOLATION FROM OTHER ESTIMATES. PRIOR KINEMATIC MODEL REPORTED TARGET UNREACHABLE. SIMULATION USE ONLY; NOT CLEARED FOR ROBOT.",
   "joint_order": [
     {
       "servo_id": 1,
@@ -30,18 +30,18 @@
     {
       "input_values": [
         "1758",
-        "1732",
-        "1853",
-        "2040",
+        "2003",
+        "1849",
+        "1994",
         "2788"
       ]
     },
     {
       "input_values": [
         "1810",
-        "1343",
-        "2337",
-        "2212",
+        "1650",
+        "2198",
+        "2146",
         "2789"
       ]
     }

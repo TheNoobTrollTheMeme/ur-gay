@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "orientation": "From the ARM SIDE: C1=LEFT, C2=MIDDLE, C3=RIGHT; R1=TOP, R2=MIDDLE, R3=BOTTOM",
+  "all_hardware_approved": false,
+  "motions": {
+    "c1r1m": {
+      "source": "recorded_original",
+      "hardware_approved": false
+    },
+    "c1r1p": {
+      "source": "recorded_original",
+      "hardware_approved": false
+    },
+    "c1r2m": {
+      "source": "unverified_estimate_assumed_kinematics",
+      "hardware_approved": false
+    },
+    "c1r2p": {
+      "source": "unverified_estimate_assumed_kinematics",
+      "hardware_approved": false
+    },
+    "c1r3m": {
+      "source": "unverified_estimate_assumed_kinematics",
+      "hardware_approved": false
+    },
+    "c1r3p": {
+      "source": "unverified_estimate_assumed_kinematics",
+      "hardware_approved": false
+    },
+    "c2r1m": {
+      "source": "recorded_original",
+      "hardware_approved": false
+    },
+    "c2r1p": {
+      "source": "recorded_original",
+      "hardware_approved": false
+    },
+    "c2r2m": {
+      "source": "unverified_estimate_assumed_kinematics",
+      "hardware_approved": false
+    },
+    "c2r2p": {
+      "source": "unverified_estimate_assumed_kinematics",
+      "hardware_approved": false
+    },
+    "c2r3m": {
+      "source": "unverified_estimate_assumed_kinematics",
+      "hardware_approved": false
+    },
+    "c2r3p": {
+      "source": "unverified_estimate_assumed_kinematics",
+      "hardware_approved": false
+    },
+    "c3r1m": {
+      "source": "unverified_estimate_assumed_kinematics",
+      "hardware_approved": false
+    },
+    "c3r1p": {
+      "source": "unverified_estimate_assumed_kinematics",
+      "hardware_approved": false
+    },
+    "c3r2m": {
+      "source": "unverified_estimate_assumed_kinematics",
+      "hardware_approved": false
+    },
+    "c3r2p": {
+      "source": "unverified_estimate_assumed_kinematics",
+      "hardware_approved": false
+    },
+    "c3r3m": {
+      "source": "unverified_additive_extrapolation_unreachable_in_assumed_model",
+      "hardware_approved": false
+    },
+    "c3r3p": {
+      "source": "unverified_additive_extrapolation_unreachable_in_assumed_model",
+      "hardware_approved": false
+    }
+  }
+}

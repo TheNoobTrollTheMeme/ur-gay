@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "type": "pose_sequence",
-  "name": "c3r2m",
+  "name": "c3r2p",
+  "description": "UNVERIFIED SIMULATION ONLY; c3r2 place. DO NOT EXECUTE ON THE ROBOT WITHOUT CALIBRATION.",
   "input_type": "raw",
-  "description": "OFFLINE SIMULATION ONLY. ESTIMATED GEOMETRY AND ZERO OFFSETS. NOT CLEARED FOR HARDWARE EXECUTION.",
   "joint_order": [
     {
       "servo_id": 1,
@@ -29,20 +29,20 @@
   "points": [
     {
       "input_values": [
-        "1758",
-        "2003",
-        "1849",
-        "1994",
-        "2788"
+        "1810",
+        "1646",
+        "2254",
+        "2013",
+        "1952"
       ]
     },
     {
       "input_values": [
-        "1810",
-        "1650",
-        "2198",
-        "2146",
-        "2789"
+        "1734",
+        "1996",
+        "1986",
+        "1564",
+        "1954"
       ]
     }
   ]
