@@ -23,6 +23,7 @@ STOP_KEYS = {' ', 'q', '\x03', '\x1b'}
 
 
 def choose():
+    refresh_attacks()
     routes = wp.find_sequences()
     for i, (path, data) in enumerate(routes, 1):
         print(f'{i}: {path.stem} ({len(data.get("points", []))} points)')
@@ -40,6 +41,8 @@ def commit(path, data):
         print(f'Backup: {backup.name}')
     path.parent.mkdir(exist_ok=True)
     wp.save_sequence(path, data)
+    if path.stem.endswith(('m', 'p')):
+        refresh_attacks()
 
 
 def capture():
@@ -79,6 +82,8 @@ def record():
         path, _ = routes[int(answer) - 1] if answer.isdigit() and 1 <= int(answer) <= len(routes) else (None, None)
         if path is None:
             raise ValueError('Choose a listed number')
+        if json.loads(path.read_text()).get('derived_from'):
+            raise ValueError('Attack files are automatic. Edit the matching m or p sequence instead.')
         data = json.loads(path.read_text())
     while True:
         for i, point in enumerate(data['points'], 1):
@@ -127,14 +132,36 @@ def wait_move(handler, terminal, timeout=15):
             raise TimeoutError('Move exceeded 15 seconds')
 
 
-def attack_points(path):
-    """Finish all m waypoints, then only waypoint 2 of the matching p file."""
-    if not path.stem.endswith('m'):
-        raise ValueError('Attack withdrawal requires an m sequence')
+def sync_attack(path):
+    """Materialize exactly M1, M2, P2 from the latest saved source values."""
     paired = path.with_name(path.stem[:-1] + 'p.json')
-    _, move_points = wp.load_sequence(path)
-    _, place_points = wp.load_sequence(paired)
-    return move_points + [place_points[1]]
+    _, m = wp.load_sequence(path)
+    _, p = wp.load_sequence(paired)
+    target_path = path.with_name(path.stem[:-1] + 'a.json')
+    data = dict(schema_version=1, type='pose_sequence', name=target_path.stem,
+                description=f'Auto attack: {path.stem}[1,2] + {paired.stem}[2]',
+                input_type='raw',
+                joint_order=[dict(servo_id=settings.SERVO_IDS[j], joint=j)
+                             for j in settings.JOINT_NAMES],
+                derived_from=dict(m=path.name, p=paired.name),
+                points=[dict(input_values=[point[j] for j in settings.JOINT_NAMES])
+                        for point in (m[0], m[1], p[1])])
+    for point in (m[0], m[1], p[1]):
+        validate_target(point)
+    if not target_path.exists() or json.loads(target_path.read_text()) != data:
+        wp.save_sequence(target_path, data)
+        print(f'Updated {target_path.name}: M1 -> M2 -> P2')
+    return target_path
+
+
+def refresh_attacks():
+    for path in sorted((ROOT / 'motions').glob('*m.json')):
+        if path.with_name(path.stem[:-1] + 'p.json').exists():
+            sync_attack(path)
+
+
+def attack_points(path):
+    return wp.load_sequence(sync_attack(path))[1]
 
 
 def validate_target(positions):
@@ -146,25 +173,16 @@ def validate_target(positions):
 
 
 def live_attack_targets(path):
-    """Read saved edits before EVERY command; never cache withdrawal coordinates."""
-    index = 0
-    while True:
-        _, current = wp.load_sequence(path)
-        if index >= len(current):
-            break
-        target = current[index]
-        validate_target(target)
-        yield f'{path.stem} waypoint {index + 1} (live)', target
-        index += 1
-    paired = path.with_name(path.stem[:-1] + 'p.json')
-    _, current = wp.load_sequence(paired)
-    target = current[1]
-    validate_target(target)
-    yield f'{paired.stem} waypoint 2 WITHDRAW (live)', target
+    """Refresh the separate attack file before each of its three steps."""
+    for index in range(3):
+        attack = sync_attack(path)
+        _, current = wp.load_sequence(attack)
+        yield f'{attack.stem} waypoint {index + 1}/3', current[index]
 
 
 def test_grid(attack=False):
     if attack:
+        refresh_attacks()
         routes = [(p, d) for p, d in wp.find_sequences() if p.stem.endswith('m')]
         for i, (path, _) in enumerate(routes, 1):
             print(f'{i}: {path.stem} -> {path.stem[:-1]}p waypoint 2')
@@ -190,7 +208,7 @@ def test_grid(attack=False):
                 if not lo <= angle <= hi:
                     raise ValueError(f'{path.name}: {joint} exceeds configured angle limits')
         batch.append((path, points))
-    print('ATTACK: all m waypoints, then ONLY matching p waypoint 2 (including its gripper target). No p waypoint 1.' if attack else 'Each route must include approach, pickup, lift, cell approach, release and safe return.')
+    print('ATTACK file: exactly M waypoint 1, M waypoint 2, then P waypoint 2 (including gripper).' if attack else 'Each route must include approach, pickup, lift, cell approach, release and safe return.')
     print('Routes must use distinct empty cells. This tool has no camera or block detection.')
     if input('Type READY to confirm these routes are taught and the workspace is clear: ').strip() != 'READY':
         return
@@ -240,6 +258,7 @@ def test_grid(attack=False):
 
 
 def main():
+    refresh_attacks()
     while True:
         answer = input('\n1 Live record/replace  2 Random grid placement test  3 LIVE attack + withdraw  Q Quit: ').strip().lower()
         try:
