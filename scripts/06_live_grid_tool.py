@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import random
+import re
 import shutil
 import sys
 import time
@@ -137,7 +138,8 @@ def sync_attack(path):
     paired = path.with_name(path.stem[:-1] + 'p.json')
     _, m = wp.load_sequence(path)
     _, p = wp.load_sequence(paired)
-    target_path = path.with_name(path.stem[:-1] + 'a.json')
+    target_path = ROOT / 'motions' / (path.stem[:-1] + 'a.json')
+    target_path.parent.mkdir(exist_ok=True)
     data = dict(schema_version=1, type='pose_sequence', name=target_path.stem,
                 description=f'Auto attack: {path.stem}[1,2] + {paired.stem}[2]',
                 input_type='raw',
@@ -148,16 +150,26 @@ def sync_attack(path):
                         for point in (m[0], m[1], p[1])])
     for point in (m[0], m[1], p[1]):
         validate_target(point)
-    if not target_path.exists() or json.loads(target_path.read_text()) != data:
+    try:
+        old = json.loads(target_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        old = None
+    if old != data:
         wp.save_sequence(target_path, data)
         print(f'Updated {target_path.name}: M1 -> M2 -> P2')
     return target_path
 
 
 def refresh_attacks():
+    count = 0
     for path in sorted((ROOT / 'motions').glob('*m.json')):
         if path.with_name(path.stem[:-1] + 'p.json').exists():
-            sync_attack(path)
+            try:
+                sync_attack(path)
+                count += 1
+            except (ValueError, OSError, RuntimeError) as error:
+                print(f'Cannot update {path.stem[:-1]}a: {error}')
+    return count
 
 
 def attack_points(path):
@@ -180,65 +192,86 @@ def live_attack_targets(path):
         yield f'{attack.stem} waypoint {index + 1}/3', current[index]
 
 
+def placement_targets(path):
+    """Complete the selected square's current move, then its current place."""
+    paired = path.with_name(path.stem[:-1] + 'p.json')
+    for route in (path, paired):
+        index = 0
+        while True:
+            _, points = wp.load_sequence(route)
+            if index >= len(points):
+                break
+            validate_target(points[index])
+            yield f'{route.stem} waypoint {index + 1}', points[index]
+            index += 1
+
+
+def cell_routes():
+    return [p for p, _ in wp.find_sequences()
+            if re.fullmatch(r'c[0-9]+r[0-9]+m', p.stem)
+            and p.with_name(p.stem[:-1] + 'p.json').exists()]
+
+
+def make_plan(paths, mode):
+    plan = [(path, random.choice(('place', 'attack')) if mode == 'mixed' else mode)
+            for path in paths]
+    random.shuffle(plan)
+    return plan
+
+
 def test_grid(attack=False):
-    if attack:
-        refresh_attacks()
-        routes = [(p, d) for p, d in wp.find_sequences() if p.stem.endswith('m')]
-        for i, (path, _) in enumerate(routes, 1):
-            print(f'{i}: {path.stem} -> {path.stem[:-1]}p waypoint 2')
-    else:
-        routes = choose()
-    answer = input('Select ONE m sequence (Q cancels): ' if attack else 'Numbers of COMPLETE cell placement routes, separated by spaces (Q cancels): ').strip()
-    if answer.lower() == 'q':
+    refresh_attacks()
+    routes = cell_routes()
+    if not routes:
+        print('No matching c#r#m.json / c#r#p.json pairs in motions.')
         return
-    numbers = list(dict.fromkeys(int(s) for s in answer.split()))
+    for i, path in enumerate(routes, 1):
+        print(f'{i}: {path.stem[:-1]}')
+    answer = input('Square number for attack (Q cancels): ' if attack else
+                   'Square numbers, or Enter for ALL (Q cancels): ').strip().lower()
+    if answer == 'q':
+        return
+    numbers = list(range(1, len(routes) + 1)) if not answer and not attack else list(dict.fromkeys(int(s) for s in answer.split()))
     if not numbers or any(n < 1 or n > len(routes) for n in numbers):
-        raise ValueError('Choose listed route numbers')
+        raise ValueError('Choose listed square numbers')
     if attack and len(numbers) != 1:
-        raise ValueError('Choose one attack sequence')
-    batch = []
-    for n in numbers:
-        path = routes[n - 1][0]
-        points = attack_points(path) if attack else wp.load_sequence(path)[1]
-        # Each selected file must teach its full collision-checked route.
-        for positions in points:
-            for joint, value in positions.items():
-                angle = position_to_angle(joint, value)
-                lo, hi = settings.ANGLE_LIMITS[joint]
-                if not lo <= angle <= hi:
-                    raise ValueError(f'{path.name}: {joint} exceeds configured angle limits')
-        batch.append((path, points))
-    print('ATTACK file: exactly M waypoint 1, M waypoint 2, then P waypoint 2 (including gripper).' if attack else 'Each route must include approach, pickup, lift, cell approach, release and safe return.')
-    print('Routes must use distinct empty cells. This tool has no camera or block detection.')
-    if input('Type READY to confirm these routes are taught and the workspace is clear: ').strip() != 'READY':
-        return
-    random.shuffle(batch)
-    print('Random order: ' + ', '.join(p.stem for p, _ in batch))
-    print('One pass only. Verify the withdrawal path is clear.' if attack else 'One pass only; no repeated cells. Refill pickup blocks between routes.')
+        raise ValueError('Choose one square')
+    mode = 'attack'
+    if not attack:
+        choice = input('1 Move + place  2 Attack  3 Random mix [Enter=3]: ').strip()
+        if choice not in ('', '1', '2', '3'):
+            raise ValueError('Choose 1, 2, or 3')
+        mode = {'1': 'place', '2': 'attack', '3': 'mixed', '': 'mixed'}[choice]
+    batch = make_plan([routes[n - 1] for n in numbers], mode)
+    # Validate the entire initial plan before opening the motor connection.
+    for path, action in batch:
+        targets = live_attack_targets(path) if action == 'attack' else placement_targets(path)
+        for _, target in targets:
+            validate_target(target)
+    print('Order: ' + ', '.join(f'{p.stem[:-1]} {action}' for p, action in batch))
+    print('One visit per square. Provide blocks for placement; set up attack squares as needed.')
+    print('No camera/block detection. Enter starts each square. Space/Q/Esc/Ctrl+C releases torque.')
     port, handler = connect()
     completed = False
     try:
         with RawTerminal() as terminal:
-            if stopped(terminal):
-                return
-            # Seed the current pose before enabling torque to avoid a stale target jump.
-            current = read_all(handler)
-            move_all_sync(handler, current, speed=300, acceleration=20)
-            if stopped(terminal):
-                return
-            enable_all_torque(handler)
-            for path, points in batch:
-                print(f'\r\nNext: {path.stem}. Refill pickup/clear cell; R starts. Space/Q/Ctrl+C stops.', flush=True)
+            for path, action in batch:
+                print(f'\r\n{path.stem[:-1]} {action}: clear/setup workspace, then ENTER. Stop = Space/Q/Esc/Ctrl+C.', flush=True)
                 while True:
                     key = terminal.read_key(0.05)
                     if key in STOP_KEYS:
                         return
-                    if key == 'r':
+                    if key in ('\r', '\n'):
                         break
-                targets = live_attack_targets(path) if attack else (
-                    (f'{path.stem}: waypoint {i}/{len(points)}', point)
-                    for i, point in enumerate(points, 1)
-                )
+                if stopped(terminal):
+                    return
+                # Seed the measured pose before enabling torque.
+                current = read_all(handler)
+                move_all_sync(handler, current, speed=300, acceleration=20)
+                if stopped(terminal):
+                    return
+                enable_all_torque(handler)
+                targets = live_attack_targets(path) if action == 'attack' else placement_targets(path)
                 for label, positions in targets:
                     if stopped(terminal):
                         return
@@ -247,20 +280,33 @@ def test_grid(attack=False):
                     if not wait_move(handler, terminal):
                         return
             completed = True
-        print('\nBatch finished. Torque remains ON to hold the final pose.')
+        print('\nFinished. Torque remains ON to hold the final pose.')
     finally:
         try:
             if not completed:
-                print('\nSTOP: releasing torque. Support the arm; it may sag.', flush=True)
+                print('\nSTOP: releasing torque; support the arm.', flush=True)
                 disable_all_torque(handler)
         finally:
             port.closePort()
 
 
+def copy_current_values():
+    """Print all measured servo values without changing torque or recordings."""
+    port, handler = connect()
+    try:
+        positions = read_all(handler)
+    finally:
+        port.closePort()
+    print('Joint order: ' + ' '.join(settings.JOINT_NAMES))
+    print('Raw: ' + ' '.join(str(positions[j]) for j in settings.JOINT_NAMES))
+    print('Angles: ' + ' '.join(f'{position_to_angle(j, positions[j]):.6f}' for j in settings.JOINT_NAMES))
+    print('Use option 1 to write all five measured values directly into a chosen waypoint.')
+
+
 def main():
     refresh_attacks()
     while True:
-        answer = input('\n1 Live record/replace  2 Random grid placement test  3 LIVE attack + withdraw  Q Quit: ').strip().lower()
+        answer = input('\n1 Live record/replace  2 Random squares  3 Attack square  4 Sync ALL attacks  5 Copy current values  Q Quit: ').strip().lower()
         try:
             if answer == 'q':
                 return
@@ -270,6 +316,11 @@ def main():
                 test_grid()
             elif answer == '3':
                 test_grid(attack=True)
+            elif answer == '4':
+                count = refresh_attacks()
+                print(f'Synced {count} attack files from current local M/P values.')
+            elif answer == '5':
+                copy_current_values()
         except (ValueError, IndexError, OSError, RuntimeError, TimeoutError) as error:
             print(f'Error: {error}')
 
@@ -279,3 +330,4 @@ if __name__ == '__main__':
         main()
     except (KeyboardInterrupt, EOFError):
         print('\nTool stopped.')
+
