@@ -127,18 +127,35 @@ def wait_move(handler, terminal, timeout=15):
             raise TimeoutError('Move exceeded 15 seconds')
 
 
-def test_grid():
-    routes = choose()
-    answer = input('Numbers of COMPLETE cell placement routes, separated by spaces (Q cancels): ').strip()
+def attack_points(path):
+    """Finish all m waypoints, then only waypoint 2 of the matching p file."""
+    if not path.stem.endswith('m'):
+        raise ValueError('Attack withdrawal requires an m sequence')
+    paired = path.with_name(path.stem[:-1] + 'p.json')
+    _, move_points = wp.load_sequence(path)
+    _, place_points = wp.load_sequence(paired)
+    return move_points + [place_points[1]]
+
+
+def test_grid(attack=False):
+    if attack:
+        routes = [(p, d) for p, d in wp.find_sequences() if p.stem.endswith('m')]
+        for i, (path, _) in enumerate(routes, 1):
+            print(f'{i}: {path.stem} -> {path.stem[:-1]}p waypoint 2')
+    else:
+        routes = choose()
+    answer = input('Select ONE m sequence (Q cancels): ' if attack else 'Numbers of COMPLETE cell placement routes, separated by spaces (Q cancels): ').strip()
     if answer.lower() == 'q':
         return
     numbers = list(dict.fromkeys(int(s) for s in answer.split()))
     if not numbers or any(n < 1 or n > len(routes) for n in numbers):
         raise ValueError('Choose listed route numbers')
+    if attack and len(numbers) != 1:
+        raise ValueError('Choose one attack sequence')
     batch = []
     for n in numbers:
         path = routes[n - 1][0]
-        _, points = wp.load_sequence(path)
+        points = attack_points(path) if attack else wp.load_sequence(path)[1]
         # Each selected file must teach its full collision-checked route.
         for positions in points:
             for joint, value in positions.items():
@@ -147,13 +164,13 @@ def test_grid():
                 if not lo <= angle <= hi:
                     raise ValueError(f'{path.name}: {joint} exceeds configured angle limits')
         batch.append((path, points))
-    print('Each route must include approach, pickup, lift, cell approach, release and safe return.')
+    print('ATTACK: all m waypoints, then ONLY matching p waypoint 2 (including its gripper target). No p waypoint 1.' if attack else 'Each route must include approach, pickup, lift, cell approach, release and safe return.')
     print('Routes must use distinct empty cells. This tool has no camera or block detection.')
     if input('Type READY to confirm these routes are taught and the workspace is clear: ').strip() != 'READY':
         return
     random.shuffle(batch)
     print('Random order: ' + ', '.join(p.stem for p, _ in batch))
-    print('One pass only; no repeated cells. Refill pickup blocks between routes.')
+    print('One pass only. Verify the withdrawal path is clear.' if attack else 'One pass only; no repeated cells. Refill pickup blocks between routes.')
     port, handler = connect()
     completed = False
     try:
@@ -194,7 +211,7 @@ def test_grid():
 
 def main():
     while True:
-        answer = input('\n1 Live record/replace  2 Random grid placement test  Q Quit: ').strip().lower()
+        answer = input('\n1 Live record/replace  2 Random grid placement test  3 Attack + withdraw  Q Quit: ').strip().lower()
         try:
             if answer == 'q':
                 return
@@ -202,6 +219,8 @@ def main():
                 record()
             elif answer == '2':
                 test_grid()
+            elif answer == '3':
+                test_grid(attack=True)
         except (ValueError, IndexError, OSError, RuntimeError, TimeoutError) as error:
             print(f'Error: {error}')
 
