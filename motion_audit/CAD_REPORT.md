@@ -4,6 +4,23 @@ No faster trajectory has been validated. All 18 M/P sequences and nine M2-to-P1
 transitions remain **BLOCKED / UNKNOWN CLEARANCE**. No real servo driver was
 imported, serial port opened, calibration changed or hardware deployed.
 
+## Existing motion behaviour
+
+Each root `c#r#m.json` and `c#r#p.json` stores exactly two raw encoder targets
+ordered base yaw, shoulder, elbow, wrist and gripper. Placement follows
+M1 → M2 → P1 → P2; the M2 → P1 bridge can contain substantial jaw travel
+(1142 raw ticks for column 1, 837 for columns 2/3). Shoulder and elbow commonly
+reverse direction around placement/withdrawal. These may be intentional
+clearance/release moves, not evidence they can safely be removed.
+
+The live tool expects files in `motions/` although this checkout supplies root
+files. It can shuffle cells and use a derived M1 → M2 → P2 attack path. Its
+five-servo sync commands use speed 300 and acceleration 20, and its 15-second
+moving-status wait does not verify joint arrival or obstacle clearance. The
+offline supervisor is separate from that live runner. Neither runner nor
+calibration is modified here; derived attacks/random inter-cell transitions
+are not certified by individual M/P preflight.
+
 ## Source evidence and what is verified
 
 The user-specified [Fusion-derived simulation repository](https://github.com/Kelvinchan324/robot-arm-simulation/tree/f4fff721c57a65ee40b7ffd3269b629b9e97310b)
@@ -34,9 +51,25 @@ extensions to prevent ordinary Python imports. They are evidence only.
 | SDK speed, position and moving-status reads | SDK/helpers | Interfaces confirmed; physical units/response timing unverified |
 | MJCF inertia, effort/velocity values | Upstream README and XML comment | Placeholders; contacts disabled, no validated dynamics |
 
-**Verified physical measurements: none supplied or collected.** Source-file
-verification and agreement with upstream numerical fixtures do not establish
-the physical installation's calibration or collision clearance.
+**No physical measurements have been independently verified by this work.**
+The user supplied the measurements below; their uncertainty and coordinate
+references are incomplete. Source verification and upstream numerical agreement
+do not establish physical installation calibration or collision clearance.
+
+| User-reported measurement | Value | How it is used |
+| --- | --- | --- |
+| Servo ID 2 shoulder rotation axis to nearest front rack edge | 287 mm | Stored as distance constraint; direction/projection uncalibrated; never treated as Servo 1/base translation |
+| Rack depth | 80 mm | Local-depth input; uncertainty unknown |
+| Rack verticality | 90 degrees to ground | Vertical description only; yaw, origin and tilt uncertainty unknown |
+| Blue tray exterior height | 20 mm | Stored independently; rim/floor references unverified |
+| Blue tray interior height | 15 mm | Stored independently; not assumed to locate rim above rack floor |
+| Possible floor difference | 5 mm | Conditional subtraction only; not promoted to measured floor thickness |
+
+SDK inspection confirms load register addresses 60–61, temperature 63 and
+current 69–70 in `sms_sts.py`. There are no dedicated ReadLoad/ReadCurrent/
+ReadTemperature helpers in this SDK class. Generic register addresses alone
+do not establish real device support, units, sign/scale, update rate or safe
+thresholds. No load/current/temperature readings or thresholds were invented.
 
 ## Collision implementation
 
@@ -69,6 +102,10 @@ Self-collision, moving obstacles/people, cable flex, load motion, braking,
 controller path differences and validated dynamics remain outside the model.
 The tool frame is a coordinate frame, not another physical body. Payload
 geometry must be supplied separately before loaded motions can be cleared.
+Optional explicit carried-block sphere covers attach to the CAD wrist frame
+and participate in swept-volume checks and displacement bounds. There is no
+default block size or grasp transform. A synthetic payload collision test
+checks this interface without inventing the real carried-block envelope.
 
 ## Preliminary rack and gripper estimates
 
@@ -87,7 +124,7 @@ synthetic test this produces 55 boxes. Rotated enclosing AABBs can over-reject.
 Its scalar uncertainty must bound all dimensional and placement errors, including
 orientation error across the full rack; no such bound has been measured here.
 
-Rack position/orientation relative to the base, rack depth, divider thickness,
+Rack position/yaw relative to the base, divider thickness,
 tray floor/rim thickness, rim height and grid bottom offset remain unknown.
 Three 100 mm pitches cover 300 mm; the remaining 50 mm of estimated rack height
 cannot be assigned to a guessed base/top offset. Gripper height, photo-axis
@@ -121,7 +158,8 @@ inflation, all rack parts and missing-parameter rejection. Fixtures validate
 agreement with upstream software, not with measured hardware. Existing jam,
 stale-feedback, timeout, stop/hold and synthetic collision tests remain included.
 
-Separate-copy result: **31 tests passed**. The CAD preflight report reproduced
+Separate-copy result: **32 tests passed**, including carried-block collision
+coverage. The CAD preflight report reproduced
 byte-for-byte from that copy. Git comparison confirms original M/P files and
 the live runner remain unchanged.
 

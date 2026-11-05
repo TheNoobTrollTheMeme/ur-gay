@@ -58,6 +58,22 @@ class CadTests(unittest.TestCase):
                 bound = sum(abs(x-y)*v for x, y, v in zip(a, q, self.arm.bounds[name]))
                 self.assertLessEqual(distance, bound+1e-10)
 
+    def test_explicit_carried_block_cover_moves_with_wrist_and_collides(self):
+        # Synthetic block dimensions/grasp, not a claim about the real payload.
+        arm = CadArm(payload_covers={'test': ((0, 0, -.4), .02)})
+        q = (0, 0, 0, .8, 0)
+        name = 'carried_block:test'
+        center, radius = arm.geometry(q)[name]
+        self.assertEqual(radius, .02)
+        self.assertEqual(arm.bounds[name], arm.bounds['wrist_carrier'])
+        obstacle = (tuple(v-.001 for v in center), tuple(v+.001 for v in center))
+        model = cad_collision_model(arm, {'synthetic_payload_obstacle': obstacle},
+                                    clearance=0, uncertainty=0, samples=10)
+        with self.assertRaisesRegex(SafetyError, 'carried_block'):
+            model.check(q, q)
+        with self.assertRaises(SafetyError):
+            CadArm(payload_covers={})
+
     def test_cad_collision_engine_integration_and_range_rejection(self):
         # A synthetic obstruction overlaps a real CAD jaw cover.
         arm = self.arm

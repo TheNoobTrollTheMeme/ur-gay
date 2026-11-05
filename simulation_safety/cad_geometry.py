@@ -59,7 +59,7 @@ def rpy(angles):
 
 
 class CadArm:
-    def __init__(self, package=ASSET):
+    def __init__(self, package=ASSET, *, payload_covers=None):
         if hashlib.sha256(Path(package).read_bytes()).hexdigest() != ASSET_SHA256:
             raise SafetyError('CAD package hash does not match reviewed upstream snapshot')
         self.covers, self.joints = {}, {}
@@ -100,6 +100,19 @@ class CadArm:
         if set(self.covers) != {'base', 'base_gear', 'yaw_platform', 'upper_arm', 'forearm',
                                 'wrist_carrier', 'gripper_pinion', 'jaw_a', 'jaw_b'}:
             raise SafetyError('unexpected CAD coverage')
+        self.attachments = {}
+        # Optional measured block covers in the wrist_carrier local frame.
+        # No default block dimensions, grasp pose or absence-of-load assumption.
+        if payload_covers is not None:
+            if not payload_covers:
+                raise SafetyError('payload covers must not be empty')
+            for label, (center, radius) in payload_covers.items():
+                if (len(center) != 3 or not all(finite(v) for v in center)
+                        or not finite(radius) or radius <= 0):
+                    raise SafetyError('invalid carried-block sphere cover')
+                name = 'carried_block:'+label
+                self.covers[name] = (tuple(center), radius)
+                self.attachments[name] = 'wrist_carrier'
         # A deliberately loose global lever-arm bound across all CAD limits.
         self.reach = sum(norm(j['pos']) for j in self.joints.values())
         self.reach += sum(max(abs(x) for x in j['limits'])*norm(j['axis']) for j in self.joints.values()
@@ -134,7 +147,7 @@ class CadArm:
                 progress = True
             if not progress:
                 raise SafetyError('disconnected CAD tree')
-        return {name: bounds[name] for name in self.covers}
+        return {name: bounds[self.attachments.get(name, name)] for name in self.covers}
 
     def transforms(self, q):
         if len(q) != 5 or not all(finite(v) for v in q):
@@ -177,8 +190,11 @@ class CadArm:
 
     def geometry(self, q):
         transforms = self.transforms(q)
-        return {name: (add(transforms[name][1], apply(transforms[name][0], c)), radius)
-                for name, (c, radius) in self.covers.items()}
+        result = {}
+        for name, (center, radius) in self.covers.items():
+            rotation, position = transforms[self.attachments.get(name, name)]
+            result[name] = (add(position, apply(rotation, center)), radius)
+        return result
 
 
 class RawCadCollision:
