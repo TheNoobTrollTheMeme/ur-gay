@@ -58,7 +58,7 @@ Read AGENTS.md and all existing motion/servo scripts. Explain what the existing 
 '@
 Set-Location $workspace
 Write-Host "Running Codex safety implementation on Windows (no robot attached)..."
-& codex.cmd exec --full-auto $task
+& codex.cmd exec --sandbox workspace-write $task
 if ($LASTEXITCODE -ne 0) { throw "Codex task failed; inspect $workspace and retry manually." }
 Write-Host "Done. Review SAFETY_STATUS.md and git diff. Nothing deployed to Pi."
 Write-Host "For future work: cd '$workspace'; codex"
