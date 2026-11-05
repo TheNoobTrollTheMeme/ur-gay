@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "type": "pose_sequence",
+  "name": "c2r1m",
+  "description": "col 2 row 1 move",
+  "input_type": "raw",
+  "joint_order": [
+    {
+      "servo_id": 1,
+      "joint": "base_yaw"
+    },
+    {
+      "servo_id": 2,
+      "joint": "shoulder"
+    },
+    {
+      "servo_id": 3,
+      "joint": "elbow"
+    },
+    {
+      "servo_id": 4,
+      "joint": "wrist"
+    },
+    {
+      "servo_id": 5,
+      "joint": "gripper"
+    }
+  ],
+  "points": [
+    {
+      "input_values": [
+        "2010",
+        "2280",
+        "1817",
+        "1931",
+        "2788"
+      ]
+    },
+    {
+      "input_values": [
+        "2010",
+        "1911",
+        "2181",
+        "1932",
+        "2789"
+      ]
+    }
+  ]
+}

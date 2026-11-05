@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "type": "pose_sequence",
+  "name": "c3r3m",
+  "input_type": "raw",
+  "description": "UNVERIFIED C3R3 BOTTOM RIGHT: JOINT-SPACE EXTRAPOLATION FROM OTHER ESTIMATES. PRIOR KINEMATIC MODEL REPORTED TARGET UNREACHABLE. SIMULATION USE ONLY; NOT CLEARED FOR ROBOT.",
+  "joint_order": [
+    {
+      "servo_id": 1,
+      "joint": "base_yaw"
+    },
+    {
+      "servo_id": 2,
+      "joint": "shoulder"
+    },
+    {
+      "servo_id": 3,
+      "joint": "elbow"
+    },
+    {
+      "servo_id": 4,
+      "joint": "wrist"
+    },
+    {
+      "servo_id": 5,
+      "joint": "gripper"
+    }
+  ],
+  "points": [
+    {
+      "input_values": [
+        "1758",
+        "1732",
+        "1853",
+        "2040",
+        "2788"
+      ]
+    },
+    {
+      "input_values": [
+        "1810",
+        "1343",
+        "2337",
+        "2212",
+        "2789"
+      ]
+    }
+  ]
+}

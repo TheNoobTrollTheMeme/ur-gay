@@ -1,0 +1,894 @@
+{
+  "status": "BLOCKED_NO_OPTIMISATION_VALIDATED",
+  "hardware_ready": false,
+  "joint_order": [
+    "base_yaw",
+    "shoulder",
+    "elbow",
+    "wrist",
+    "gripper"
+  ],
+  "units": "absolute raw encoder differences; no wraparound or angle assumption",
+  "speed_before": 300,
+  "acceleration_before": 20,
+  "speed_after": null,
+  "acceleration_after": null,
+  "timing": "unknown: command units, limits, dynamics and load uncalibrated",
+  "motions": [
+    {
+      "file": "c1r1m.json",
+      "sha256": "6d2ad2a8e7edbb87530c5d27c0d676e85addd36c2b43e243ce41a7f4ce898cff",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        33,
+        306,
+        258,
+        1,
+        190
+      ],
+      "after_joint_travel": [
+        33,
+        306,
+        258,
+        1,
+        190
+      ],
+      "before_total": 788,
+      "after_total": 788,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c1r1p.json",
+      "sha256": "e0c129c5dd0d600fc9995b4cfa1d736f43bdde1ccc09699d51e0cf29661694b6",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        10,
+        437,
+        597,
+        200,
+        2
+      ],
+      "after_joint_travel": [
+        10,
+        437,
+        597,
+        200,
+        2
+      ],
+      "before_total": 1246,
+      "after_total": 1246,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c1r2m.json",
+      "sha256": "0b85df0012f519f00be73e9c102bb2e13abcf58d289dc9d9f7c88705430fef14",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        30,
+        300,
+        221,
+        244,
+        190
+      ],
+      "after_joint_travel": [
+        30,
+        300,
+        221,
+        244,
+        190
+      ],
+      "before_total": 985,
+      "after_total": 985,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c1r2p.json",
+      "sha256": "f2e2fc1eba4ad745e939b00703d7d2b79f1c8835c7b4bc1666bc78a5c21e8f39",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        44,
+        306,
+        222,
+        408,
+        2
+      ],
+      "after_joint_travel": [
+        44,
+        306,
+        222,
+        408,
+        2
+      ],
+      "before_total": 982,
+      "after_total": 982,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c1r3m.json",
+      "sha256": "62a24989d88b9090862c516821b726c55771101125281922e97b01562133d8af",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        30,
+        348,
+        362,
+        274,
+        190
+      ],
+      "after_joint_travel": [
+        30,
+        348,
+        362,
+        274,
+        190
+      ],
+      "before_total": 1204,
+      "after_total": 1204,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c1r3p.json",
+      "sha256": "cb24f27dd1aa856cd318c96ec684fcbd9839d122476137645e440987cc7d75b2",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        44,
+        317,
+        309,
+        501,
+        2
+      ],
+      "after_joint_travel": [
+        44,
+        317,
+        309,
+        501,
+        2
+      ],
+      "before_total": 1173,
+      "after_total": 1173,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c2r1m.json",
+      "sha256": "e331cc9c5105194a474fceeb7dc2d465f3de01f7af47a53adf741b583339c916",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        0,
+        369,
+        364,
+        1,
+        1
+      ],
+      "after_joint_travel": [
+        0,
+        369,
+        364,
+        1,
+        1
+      ],
+      "before_total": 735,
+      "after_total": 735,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c2r1p.json",
+      "sha256": "90921f09401fffa8790e35a40054bd6831f4db6d947300d2a9d405abcb1fc826",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        1,
+        500,
+        463,
+        129,
+        2
+      ],
+      "after_joint_travel": [
+        1,
+        500,
+        463,
+        129,
+        2
+      ],
+      "before_total": 1095,
+      "after_total": 1095,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c2r2m.json",
+      "sha256": "435f66419c7fc92d09f757fb546e44518d2c6f69f7e7b4816069ef0e64eec22b",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        16,
+        324,
+        263,
+        174,
+        1
+      ],
+      "after_joint_travel": [
+        16,
+        324,
+        263,
+        174,
+        1
+      ],
+      "before_total": 778,
+      "after_total": 778,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c2r2p.json",
+      "sha256": "f8928ce751f13a3d9ca3dd005efe7a526cc1e55dd2dd5c3f7f77e2ff2a2ae6e8",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        24,
+        319,
+        230,
+        396,
+        2
+      ],
+      "after_joint_travel": [
+        24,
+        319,
+        230,
+        396,
+        2
+      ],
+      "before_total": 971,
+      "after_total": 971,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c2r3m.json",
+      "sha256": "049b1915a6aea28980842297c6ed96a792726d48c886c18821fb300639ee5562",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        16,
+        360,
+        398,
+        194,
+        1
+      ],
+      "after_joint_travel": [
+        16,
+        360,
+        398,
+        194,
+        1
+      ],
+      "before_total": 969,
+      "after_total": 969,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c2r3p.json",
+      "sha256": "2cc71b9b98c32d939dba28f7b9d739a22db04d7d88dc411ed2d5034d950ea57d",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        24,
+        322,
+        317,
+        476,
+        2
+      ],
+      "after_joint_travel": [
+        24,
+        322,
+        317,
+        476,
+        2
+      ],
+      "before_total": 1141,
+      "after_total": 1141,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c3r1m.json",
+      "sha256": "a9649bd8b80a42a7d6b0c2639bd5b5c28829bc66904a6f3a04122e70d9de83ab",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        52,
+        370,
+        385,
+        75,
+        1
+      ],
+      "after_joint_travel": [
+        52,
+        370,
+        385,
+        75,
+        1
+      ],
+      "before_total": 883,
+      "after_total": 883,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c3r1p.json",
+      "sha256": "e51bcb8d62f7ac8ea157d542a3090b92c868f82a90eaf0c48b09cef9af56b48e",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        76,
+        380,
+        247,
+        509,
+        2
+      ],
+      "after_joint_travel": [
+        76,
+        380,
+        247,
+        509,
+        2
+      ],
+      "before_total": 1214,
+      "after_total": 1214,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c3r2m.json",
+      "sha256": "f1368375b488f27ebf46920e53275ded57e80e09e39fbab9e2269eb2e958a1e0",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        52,
+        353,
+        349,
+        152,
+        1
+      ],
+      "after_joint_travel": [
+        52,
+        353,
+        349,
+        152,
+        1
+      ],
+      "before_total": 907,
+      "after_total": 907,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c3r2p.json",
+      "sha256": "af50f638462af20ce7b193bb5b77046e0c28719827c7199404544d05e9cb8b27",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        76,
+        350,
+        268,
+        449,
+        2
+      ],
+      "after_joint_travel": [
+        76,
+        350,
+        268,
+        449,
+        2
+      ],
+      "before_total": 1145,
+      "after_total": 1145,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c3r3m.json",
+      "sha256": "43c91fab4e018a6c434ac8f2d5302802ed3d873005b7b1a6c5f63f9c00aa55b5",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        52,
+        389,
+        484,
+        172,
+        1
+      ],
+      "after_joint_travel": [
+        52,
+        389,
+        484,
+        172,
+        1
+      ],
+      "before_total": 1098,
+      "after_total": 1098,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "file": "c3r3p.json",
+      "sha256": "817447f5e76f12320f83bc25dc1af6fcba830d118da0e644c7093226d95bb34f",
+      "candidate": "unchanged baseline; blocked, not optimised",
+      "recorded_waypoints": 2,
+      "before_joint_travel": [
+        76,
+        353,
+        355,
+        529,
+        2
+      ],
+      "after_joint_travel": [
+        76,
+        353,
+        355,
+        529,
+        2
+      ],
+      "before_total": 1315,
+      "after_total": 1315,
+      "reduction": 0,
+      "simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    }
+  ],
+  "cells": [
+    {
+      "cell": "c1r1",
+      "m2_to_p1_travel": [
+        9,
+        28,
+        29,
+        46,
+        1142
+      ],
+      "before_joint_travel": [
+        52,
+        771,
+        884,
+        247,
+        1334
+      ],
+      "after_joint_travel": [
+        52,
+        771,
+        884,
+        247,
+        1334
+      ],
+      "before_total": 3288,
+      "after_total": 3288,
+      "direction_reversals": [
+        1,
+        1,
+        1,
+        0,
+        1
+      ],
+      "transition_simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "cell": "c1r2",
+      "m2_to_p1_travel": [
+        0,
+        21,
+        83,
+        135,
+        1142
+      ],
+      "before_joint_travel": [
+        74,
+        627,
+        526,
+        787,
+        1334
+      ],
+      "after_joint_travel": [
+        74,
+        627,
+        526,
+        787,
+        1334
+      ],
+      "before_total": 3348,
+      "after_total": 3348,
+      "direction_reversals": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "transition_simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "cell": "c1r3",
+      "m2_to_p1_travel": [
+        0,
+        9,
+        49,
+        91,
+        1142
+      ],
+      "before_joint_travel": [
+        74,
+        674,
+        720,
+        866,
+        1334
+      ],
+      "after_joint_travel": [
+        74,
+        674,
+        720,
+        866,
+        1334
+      ],
+      "before_total": 3668,
+      "after_total": 3668,
+      "direction_reversals": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "transition_simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "cell": "c2r1",
+      "m2_to_p1_travel": [
+        1,
+        3,
+        16,
+        1,
+        837
+      ],
+      "before_joint_travel": [
+        2,
+        872,
+        843,
+        131,
+        840
+      ],
+      "after_joint_travel": [
+        2,
+        872,
+        843,
+        131,
+        840
+      ],
+      "before_total": 2688,
+      "after_total": 2688,
+      "direction_reversals": [
+        0,
+        1,
+        1,
+        1,
+        2
+      ],
+      "transition_simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "cell": "c2r2",
+      "m2_to_p1_travel": [
+        0,
+        19,
+        107,
+        206,
+        837
+      ],
+      "before_joint_travel": [
+        40,
+        662,
+        600,
+        776,
+        840
+      ],
+      "after_joint_travel": [
+        40,
+        662,
+        600,
+        776,
+        840
+      ],
+      "before_total": 2918,
+      "after_total": 2918,
+      "direction_reversals": [
+        1,
+        1,
+        1,
+        1,
+        2
+      ],
+      "transition_simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "cell": "c2r3",
+      "m2_to_p1_travel": [
+        0,
+        5,
+        64,
+        144,
+        837
+      ],
+      "before_joint_travel": [
+        40,
+        687,
+        779,
+        814,
+        840
+      ],
+      "after_joint_travel": [
+        40,
+        687,
+        779,
+        814,
+        840
+      ],
+      "before_total": 3160,
+      "after_total": 3160,
+      "direction_reversals": [
+        1,
+        1,
+        1,
+        1,
+        2
+      ],
+      "transition_simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "cell": "c3r1",
+      "m2_to_p1_travel": [
+        0,
+        3,
+        21,
+        63,
+        837
+      ],
+      "before_joint_travel": [
+        128,
+        753,
+        653,
+        647,
+        840
+      ],
+      "after_joint_travel": [
+        128,
+        753,
+        653,
+        647,
+        840
+      ],
+      "before_total": 3021,
+      "after_total": 3021,
+      "direction_reversals": [
+        1,
+        1,
+        1,
+        1,
+        2
+      ],
+      "transition_simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "cell": "c3r2",
+      "m2_to_p1_travel": [
+        0,
+        4,
+        56,
+        133,
+        837
+      ],
+      "before_joint_travel": [
+        128,
+        707,
+        673,
+        734,
+        840
+      ],
+      "after_joint_travel": [
+        128,
+        707,
+        673,
+        734,
+        840
+      ],
+      "before_total": 3082,
+      "after_total": 3082,
+      "direction_reversals": [
+        1,
+        1,
+        1,
+        1,
+        2
+      ],
+      "transition_simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    },
+    {
+      "cell": "c3r3",
+      "m2_to_p1_travel": [
+        0,
+        10,
+        13,
+        71,
+        837
+      ],
+      "before_joint_travel": [
+        128,
+        752,
+        852,
+        772,
+        840
+      ],
+      "after_joint_travel": [
+        128,
+        752,
+        852,
+        772,
+        840
+      ],
+      "before_total": 3344,
+      "after_total": 3344,
+      "direction_reversals": [
+        1,
+        1,
+        1,
+        1,
+        2
+      ],
+      "transition_simulation": {
+        "state": "FAULT",
+        "commands": 0,
+        "reason": "measured joint limits and monitoring policy unavailable",
+        "geometry": "unavailable"
+      }
+    }
+  ]
+}
