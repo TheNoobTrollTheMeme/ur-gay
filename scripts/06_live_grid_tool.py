@@ -16,6 +16,7 @@ import arm_settings as settings
 from arm_helpers import (connect, disable_all_torque, enable_all_torque,
                          read_all, move_all_sync, position_to_angle, check_result)
 from terminal_keys import RawTerminal
+from simulation_safety.attack_policy import attack_targets
 
 spec = importlib.util.spec_from_file_location('waypoints', ROOT / 'scripts/05_waypoint_sequence.py')
 wp = importlib.util.module_from_spec(spec)
@@ -138,17 +139,18 @@ def sync_attack(path):
     paired = path.with_name(path.stem[:-1] + 'p.json')
     _, m = wp.load_sequence(path)
     _, p = wp.load_sequence(paired)
+    attack = attack_targets(m, p)
     target_path = ROOT / 'motions' / (path.stem[:-1] + 'a.json')
     target_path.parent.mkdir(exist_ok=True)
     data = dict(schema_version=1, type='pose_sequence', name=target_path.stem,
-                description=f'Auto attack: {path.stem}[1,2] + {paired.stem}[2]',
+                description=f'Auto attack: M1 M2 P2(1-4) with M2 gripper(5) closed',
                 input_type='raw',
                 joint_order=[dict(servo_id=settings.SERVO_IDS[j], joint=j)
                              for j in settings.JOINT_NAMES],
                 derived_from=dict(m=path.name, p=paired.name),
                 points=[dict(input_values=[point[j] for j in settings.JOINT_NAMES])
-                        for point in (m[0], m[1], p[1])])
-    for point in (m[0], m[1], p[1]):
+                        for point in attack])
+    for point in attack:
         validate_target(point)
     try:
         old = json.loads(target_path.read_text())
@@ -156,7 +158,7 @@ def sync_attack(path):
         old = None
     if old != data:
         wp.save_sequence(target_path, data)
-        print(f'Updated {target_path.name}: M1 -> M2 -> P2')
+        print(f'Updated {target_path.name}: M1 -> M2 -> P2(1-4) + M2(5 closed)')
     return target_path
 
 
@@ -251,6 +253,9 @@ def test_grid(attack=False):
     print('Order: ' + ', '.join(f'{p.stem[:-1]} {action}' for p, action in batch))
     print('One visit per square. Provide blocks for placement; set up attack squares as needed.')
     print('No camera/block detection. Enter starts each square. Space/Q/Esc/Ctrl+C releases torque.')
+    # Development branch lacks calibrated collision clearance and verified safe hold.
+    # Fail closed: don't send motor commands from this live grid runner.
+    raise RuntimeError('LIVE GRID DISABLED: unverified rack clearance and gravity/stop behaviour. Simulation-only branch.')
     port, handler = connect()
     completed = False
     try:
