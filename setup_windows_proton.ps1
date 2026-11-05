@@ -45,17 +45,20 @@ if (Test-Path (Join-Path $workspace ".git")) {
   if ($LASTEXITCODE -ne 0) { throw "Git clone failed." }
 }
 Write-Host "Codex sign-in may open your browser. Stay connected to Proton VPN."
-codex login status *> $null
+# In Windows PowerShell 5.1, native stderr can become a terminating error when
+# $ErrorActionPreference is Stop. Check login status through cmd with output suppressed.
+& cmd.exe /d /c "codex.cmd login status >nul 2>&1"
 if ($LASTEXITCODE -ne 0) {
-  codex login
-  if ($LASTEXITCODE -ne 0) { throw "Codex sign-in failed." }
+  Write-Host "Codex is not signed in yet. Starting interactive browser login..."
+  & codex.cmd login
+  if ($LASTEXITCODE -ne 0) { throw "Codex sign-in failed. Keep Proton VPN connected and retry." }
 }
 $task = @'
 Read AGENTS.md and all existing motion/servo scripts. Explain what the existing M and P sequences do and which hardware details cannot be inferred from code. Work ONLY in this isolated Windows checkout, which has no robot servo connection. Implement and test a fail-closed simulated safety supervisor: fault-latched safe stops, timeout/stale-feedback detection, tracking error, load/current and heat checks only when confirmed supported, mock telemetry, simulated collision checking with uncalibrated geometry clearly flagged, two user-recorded waypoints preserved, and a readable SAFETY_STATUS.md report. Never use real hardware or servo connections; do not deploy or run motor-control scripts, do not modify calibration or push to main. Make tests simulation-only.
 '@
 Set-Location $workspace
 Write-Host "Running Codex safety implementation on Windows (no robot attached)..."
-codex exec --full-auto $task
+& codex.cmd exec --full-auto $task
 if ($LASTEXITCODE -ne 0) { throw "Codex task failed; inspect $workspace and retry manually." }
 Write-Host "Done. Review SAFETY_STATUS.md and git diff. Nothing deployed to Pi."
 Write-Host "For future work: cd '$workspace'; codex"
