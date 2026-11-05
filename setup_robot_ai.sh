@@ -33,7 +33,16 @@ command -v codex >/dev/null 2>&1 || {
 echo "[2/4] Selecting isolated workspace..."
 # Always use an isolated workspace: never overwrite uncommitted robot code.
 if [[ -d "$WORKSPACE/.git" ]]; then
-  echo "Existing workspace found; leaving its files and branch untouched."
+  echo "Existing workspace found. Checking for local edits..."
+  if [[ -n "$(git -C "$WORKSPACE" status --porcelain)" ]]; then
+    echo "Refusing to update existing workspace with local edits. Preserve them first." >&2
+    exit 1
+  fi
+  if [[ "$(git -C "$WORKSPACE" branch --show-current)" != "$BRANCH" ]]; then
+    echo "Existing workspace is on another branch. Refusing to switch branches." >&2
+    exit 1
+  fi
+  git -C "$WORKSPACE" pull --ff-only origin "$BRANCH"
 elif [[ -e "$WORKSPACE" ]]; then
   echo "Refusing to overwrite existing $WORKSPACE" >&2; exit 1
 else
