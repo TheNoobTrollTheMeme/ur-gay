@@ -27,6 +27,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
 const scene=new THREE.Scene();scene.background=new THREE.Color('#ebf1f6');
 const camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,.005,10);
+camera.up.set(0,0,1); // URDF / scene use Z-up, unlike Three.js default Y-up.
 camera.position.set(.55,-.65,.48);
 const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;
