@@ -18,11 +18,27 @@ command -v git >/dev/null || { echo "Please install git first: sudo apt install 
 
 if ! command -v codex >/dev/null 2>&1; then
   echo "[1/4] Installing official OpenAI Codex CLI..."
-  tmp="$(mktemp)"
-  trap 'rm -f "$tmp"' EXIT
-  curl --fail --location --silent --show-error https://chatgpt.com/codex/install.sh -o "$tmp"
-  sh "$tmp"
-  export PATH="$HOME/.local/bin:$HOME/.codex/bin:$PATH"
+  # Download the official Codex CLI binary from GitHub Releases.
+  # This avoids depending on chatgpt.com/codex/install.sh (403 on some campus networks).
+  case "$(uname -m)" in
+    aarch64) arch="aarch64" ;;
+    x86_64) arch="x86_64" ;;
+  esac
+  tmpdir="$(mktemp -d)"
+  trap 'rm -rf "$tmpdir"' EXIT
+  asset="codex-${arch}-unknown-linux-musl.tar.gz"
+  echo "Fetching official GitHub release: $asset"
+  curl --fail --location --silent --show-error --retry 2 \
+    "https://github.com/openai/codex/releases/latest/download/$asset" -o "$tmpdir/codex.tar.gz" || {
+      echo "GitHub Releases download failed. Network access may block release assets too." >&2
+      exit 1
+    }
+  tar -tzf "$tmpdir/codex.tar.gz" >/dev/null
+  tar -xzf "$tmpdir/codex.tar.gz" -C "$tmpdir"
+  test -f "$tmpdir/codex-${arch}-unknown-linux-musl"
+  mkdir -p "$HOME/.local/bin"
+  install -m 0755 "$tmpdir/codex-${arch}-unknown-linux-musl" "$HOME/.local/bin/codex"
+  export PATH="$HOME/.local/bin:$PATH"
 else
   echo "[1/4] Codex already available."
 fi
