@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ENGG1101 CAD Arm + Provisional Rack</title>
+<style>
+html,body{margin:0;height:100%;font-family:system-ui,Arial;background:#101b27;color:#edf5fd}
+#scene{position:absolute;inset:0}
+#panel{position:absolute;left:16px;top:16px;background:#142333ec;border:1px solid #587185;border-radius:12px;padding:16px;width:320px;max-width:calc(100vw - 64px);box-shadow:0 9px 35px #0005}
+h1{font-size:19px;margin:0 0 7px}p{font-size:12px;line-height:1.5;color:#c2d4e0}label{display:flex;align-items:center;gap:8px;font-size:12px;margin:8px 0}
+label span{width:105px}input{flex:1;min-width:0}output{width:48px;text-align:right;font-variant-numeric:tabular-nums}
+button{background:#236b84;color:white;border:0;border-radius:7px;padding:8px 11px;cursor:pointer}
+#status{font-size:12px;color:#8cdbdf}.warn{color:#ffbe83}
+#foot{position:absolute;bottom:10px;left:16px;font-size:12px;background:#142333df;padding:8px 11px;border-radius:8px;max-width:720px}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+</head><body>
+<div id="scene"></div>
+<section id="panel"><h1>ENGG1101 real-CAD model</h1><div id="status">Loading Kevin's actual OBJ meshes…</div>
+<p>Joint sliders use <b>CAD radians converted to degrees</b>, NOT raw encoder ticks. Rack facing is a deliberate assumption and the resulting clearances are NOT validated.</p>
+<div id="sliders"></div>
+<button id="reset">Reset to exported CAD pose</button>
+<p class="warn">Measured: shoulder axis → nearest rack front edge 287 mm, rack depth 80 mm, tray outer/inner height 20/15 mm. Assumed: rack yaw, centre, pitch, beam thickness and tray placement.</p>
+</section>
+<div id="foot">Orbit: drag • Zoom: wheel • CAD meshes: Kelvinchan324/robot-arm-simulation • <b>Not an actual motion/collision simulator</b></div>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
+const scene=new THREE.Scene();scene.background=new THREE.Color('#ebf1f6');
+const camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,.005,10);
+camera.position.set(.55,-.65,.48);
+const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;
+document.querySelector('#scene').append(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff,0x667b97,2.7));
+const light=new THREE.DirectionalLight(0xffffff,2.4);light.position.set(.35,-.25,1);scene.add(light);
+const grid=new THREE.GridHelper(.8,16,0x9caabb,0xc9d4dc);grid.rotation.x=Math.PI/2;scene.add(grid);
+const controls=new OrbitControls(camera,renderer.domElement);controls.target.set(0,-.09,.15);controls.enableDamping=true;
+const status=document.querySelector('#status');
+const baseURL='https://raw.githubusercontent.com/Kelvinchan324/robot-arm-simulation/main/dist/robot/';
+const arm = new THREE.Group();scene.add(arm);
+const links={base:arm};
+const J=[
+{name:'base_yaw',parent:'base',child:'yaw_platform',pos:[0,0,.0497],axis:[0,0,-1],range:[-180,180]},
+{name:'base_gear_drive',parent:'base',child:'base_gear',pos:[-.0128,.05040000097,.04005],axis:[0,0,-1],mimic:'base_yaw',gain:-1},
+{name:'shoulder',parent:'yaw_platform',child:'upper_arm',pos:[-.001148084157,.05207040333,.0577],axis:[-.9402479141,-.3404906166,0],range:[-120.94,71.06]},
+{name:'elbow',parent:'upper_arm',child:'forearm',pos:[-.006135781789,.01841212569,.1189216373],axis:[-.9402479141,-.3404906166,0],range:[-106.85,87.16]},
+{name:'wrist_pitch',parent:'forearm',child:'wrist_carrier',pos:[.03923147545,-.1080420757,.1033874809],axis:[-.9402479141,-.3404906166,0],range:[-.2936,206.71]},
+{name:'gripper_drive',parent:'wrist_carrier',child:'gripper_pinion',pos:[-.005424859534,-.03274477062,-.06924533122],axis:[-.1313013867,.3625822532,.922655979],range:[-64.23,91.61]},
+{name:'jaw_a_slide',parent:'wrist_carrier',child:'jaw_a',pos:[-.03351460613,-.03884039784,-.09897261534],axis:[-.9402479141,-.3404906166,0],slide:true,mimic:'gripper_drive',gain:-.0125},
+{name:'jaw_b_slide',parent:'wrist_carrier',child:'jaw_b',pos:[.02005475793,-.01944140155,-.09897261534],axis:[.9402479141,.3404906166,0],slide:true,mimic:'jaw_a_slide',gain:1},
+];
+const movers={},values={base_yaw:0,shoulder:0,elbow:0,wrist_pitch:0,gripper_drive:0};
+for(const j of J){const g=new THREE.Group();g.position.set(...j.pos);links[j.parent].add(g);const child=new THREE.Group();g.add(child);links[j.child]=child;movers[j.name]=j; j.hinge=child}
+const loader=new OBJLoader();
+const colors={base:0x3c4955,base_gear:0xa2b1bc,yaw_platform:0x377d8f,upper_arm:0x91a3af,forearm:0x91a3af,wrist_carrier:0x287d91,gripper_pinion:0xa57b40,jaw_a:0xb3c1c9,jaw_b:0xb3c1c9};
+let loaded=0;
+for(const name of Object.keys(colors)){
+ loader.load(baseURL+name+'.obj',obj=>{
+ obj.traverse(o=>{if(o.isMesh){o.material=new THREE.MeshStandardMaterial({color:colors[name],metalness:.32,roughness:.64,side:THREE.DoubleSide})}});
+ links[name].add(obj);loaded++;status.textContent='Loaded '+loaded+'/9 genuine OBJ parts';if(loaded===9)status.textContent='All nine upstream CAD mesh groups loaded';
+ },undefined,e=>{status.textContent='Mesh load failed: '+name+'; check browser VPN / CDN';console.error(e)});
+}
+function value(n){const j=movers[n];if(!j.mimic)return values[n]*Math.PI/180;return value(j.mimic)*j.gain}
+function update(){
+ for(const j of J){const v=value(j.name),axis=new THREE.Vector3(...j.axis).normalize();
+   if(j.slide)j.hinge.position.copy(axis.multiplyScalar(v));else j.hinge.quaternion.setFromAxisAngle(axis,v);
+ }
+}
+const sliders=document.querySelector('#sliders');
+for(const j of J.filter(x=>x.range)){
+ const row=document.createElement('label'),caption=document.createElement('span'),slider=document.createElement('input'),out=document.createElement('output');
+ caption.textContent=j.name;slider.type='range';slider.min=j.range[0];slider.max=j.range[1];slider.step=.5;slider.value=0;out.textContent='0°';
+ slider.oninput=()=>{values[j.name]=Number(slider.value);out.textContent=slider.value+'°';update()};
+ row.append(caption,slider,out);sliders.append(row);j.slider=slider;j.out=out;
+}
+document.querySelector('#reset').onclick=()=>{for(const j of J.filter(x=>x.range)){j.slider.value=0;j.out.textContent='0°';values[j.name]=0}update()};
+update();
+const rack=new THREE.Group();scene.add(rack);
+const wood=new THREE.MeshStandardMaterial({color:0xb78b56,roughness:.9}),trayMat=new THREE.MeshStandardMaterial({color:0x229ed7,roughness:.75,transparent:true,opacity:.62});
+function box(parent,c,size,mat){const mesh=new THREE.Mesh(new THREE.BoxGeometry(...size),mat);mesh.position.set(...c);parent.add(mesh);return mesh}
+// coordinate: shoulder q=0 Y=0.0520704, assume rack front Y=shoulder.Y-0.287; 80mm extends farther -Y
+const front=.05207040333-.287,depth=.08,pitch=.1,width=.3,thickness=.01;
+for(let i=0;i<=3;i++)box(rack,[-.15+i*pitch,front-depth/2,.175],[thickness,depth,.35],wood);
+for(const z of [0,.1,.2,.3,.35])box(rack,[0,front-depth/2,z],[width+thickness,depth,thickness],wood);
+for(let col=0;col<3;col++)for(let row=0;row<3;row++){
+ const x=-.1+col*pitch,z=.009+row*pitch;
+ box(rack,[x,front-depth/2,z],[.085,.071,.004],trayMat);
+ for(const side of [-1,1])box(rack,[x+side*.041,front-depth/2,z+.009],[.003,.071,.018],trayMat);
+ for(const side of [-1,1])box(rack,[x,front-depth/2+side*.034,z+.009],[.084,.003,.018],trayMat);
+}
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(1,1),new THREE.MeshStandardMaterial({color:0xe2e8ed,side:THREE.DoubleSide}));
+ground.position.z=-.015;scene.add(ground);
+function animate(){requestAnimationFrame(animate);controls.update();renderer.render(scene,camera)}animate();
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+</script></body></html>
