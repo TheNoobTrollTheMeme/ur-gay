@@ -4,6 +4,15 @@ Report date: 2026-11-05. **Not ready for hardware.** No serial port was opened,
 no real driver was imported, and no physical servo commands or hardware tests
 were executed. No deployment or calibration changes were made.
 
+Update: the user-specified upstream Fusion URDF/MJCF and meshes are now pinned
+and integrated as conservative CAD collision covers. See
+`motion_audit/CAD_REPORT.md` for source commits, physical measurement gaps,
+photo estimates, rack topology and current tests. The earlier assessment below
+describes the initial implementation. CAD geometry is now available, but a
+measured raw-to-CAD mapping and complete physical scene remain unavailable;
+all 18 M/P paths and nine M-to-P bridges remain blocked. No faster motion is
+validated and no hardware integration is enabled.
+
 Development initially took place in the separate `safety_workcopy/` directory.
 Its actual implementation is now organised as `simulation_safety/supervisor.py`
 and `tests/test_supervisor.py`, with a package initializer. The original live

@@ -1,0 +1,27 @@
+{
+  "status": "PHOTO_ESTIMATES_ONLY_CLEARANCE_UNKNOWN",
+  "units": "metres",
+  "photo_estimates": {
+    "gripper_width": {"nominal": 0.130, "uncertainty": null},
+    "gripper_depth": {"interval": [0.070, 0.080], "additional_uncertainty": null},
+    "rack_height": {"nominal": 0.350, "uncertainty": null},
+    "divider_spacing": {"nominal": 0.100, "uncertainty": null}
+  },
+  "rack_parameters": {
+    "origin": null,
+    "orientation": null,
+    "height": 0.350,
+    "pitch": 0.100,
+    "grid_bottom": null,
+    "depth": null,
+    "divider_thickness": null,
+    "tray_thickness": null,
+    "rim_height": null,
+    "rim_thickness": null,
+    "uncertainty": null
+  },
+  "raw_to_cad_mapping": null,
+  "held_object_envelope": null,
+  "physical_mesh_coverage_uncertainty": null,
+  "note": "Null uncertainty is unknown, never zero. Three 100 mm pitches cover 300 mm; the remaining 50 mm of estimated rack height is not assigned to a guessed base/top offset. Gripper photo axes and housing height are unknown. No photo size is a verified CAD scale correction."
+}
