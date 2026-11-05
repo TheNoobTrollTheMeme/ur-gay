@@ -1,0 +1,24 @@
+# Local development copy and duplicate source snapshots
+/safety_workcopy/
+
+# Python caches, environments and test artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local credentials and generated logs / temporary files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.jsonl
+*.log
+*.tmp
+*.bak
