@@ -14,9 +14,9 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
   Write-Host "Installing official Codex CLI..."
   $env:CODEX_INSTALLER_USE_RELEASES_OPENAI_COM = "false"
-  $install = Invoke-WebRequest -Uri "https://chatgpt.com/codex/install.ps1" -UseBasicParsing
-  # The official installation script is controlled by OpenAI; review at URL if preferred.
-  Invoke-Expression $install.Content
+  # Invoke-RestMethod returns script text; Invoke-WebRequest may return a byte array on Windows PowerShell.
+  # Use the documented official install pipeline.
+  Invoke-RestMethod "https://chatgpt.com/codex/install.ps1" | Invoke-Expression
   $env:PATH = "$HOME\.local\bin;$HOME\.codex\bin;" + $env:PATH
 }
 if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { throw "Codex executable not found after installation. Restart PowerShell and retry." }
