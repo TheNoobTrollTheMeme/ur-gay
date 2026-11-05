@@ -60,9 +60,27 @@ if ! codex login status >/dev/null 2>&1; then
   codex login --device-auth
 fi
 
-echo "[4/4] Starting Codex in $WORKSPACE"
-echo "This is a separate copy. Existing live scripts remain untouched."
-echo "Ask Codex to inspect the repo, build collision checks, and create a test report."
-echo "To run again: cd '$WORKSPACE' && codex"
+echo "[4/4] Building safety features with Codex (simulation-only)..."
+echo "Workspace is isolated from your live robot scripts."
 cd "$WORKSPACE"
-exec codex
+# Read-only system inspection, workspace-only edits; do not grant unrestricted access.
+cat > "$WORKSPACE/SAFETY_BUILD_TASK.md" <<'TASK'
+Inspect the existing robot-arm source code and map the current M/P motion files, waypoint formats, servo interface, and execution entry points. Create an implementation report describing what each part currently does and which details remain unknown. Build and unit-test in SIMULATION ONLY:
+1. A default-disabled hardware gate, mock servo driver, fault-latching safety supervisor with manual reset.
+2. Tracking-error detection, stale feedback timeout, communication failure and command timeouts. Add current/load and temperature checks ONLY where supported by real code. Use conservative configurable thresholds marked UNCALIBRATED until baseline logs have been reviewed; do not claim calibrated sensitivity.
+3. Safe stop that clears queued movement and requests documented hold/stop behavior on driver integration. NEVER auto-home or auto-retract after a jam.
+4. Mocked servo feedback and timestamped flight recorder logs for faults.
+5. Collision-checking scaffolding using measured geometry only, evaluating swept volumes of gripper and links. Unknown geometry must BLOCK hardware-ready claims.
+6. Preserve exactly two USER-RECORDED waypoints per M/P motion; sampled interpolation for validation is acceptable.
+7. Add reproducible unit tests for normal tracking, jams, overheating (if supported), stale feedback, unavailable telemetry, and reset-required faults.
+8. Produce SAFETY_STATUS.md: which features are implemented, wired to real driver, tested only in simulation, and still require human calibration.
+No serial/USB device I/O, no motor commands, no hardware tests, no auto-deployment, no push to main. Never run existing movement scripts. Do not modify calibration or overwrite live files.
+TASK
+# Running Codex is an explicit operator action via this installer. It remains sandboxed.
+codex exec --full-auto "$(cat SAFETY_BUILD_TASK.md)" || {
+  echo "Automatic code generation did not finish. Resume interactively: cd '$WORKSPACE' && codex"
+  exit 1
+}
+echo "Simulation-only safety implementation finished. Review $WORKSPACE/SAFETY_STATUS.md"
+echo "Nothing has been deployed to the real robot. Human verification required."
+echo "To inspect changes: cd '$WORKSPACE' && git diff"
