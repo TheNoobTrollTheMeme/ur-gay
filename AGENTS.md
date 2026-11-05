@@ -14,3 +14,6 @@ This repository controls a real 5DOF robot arm. **Never run actual hardware moti
 - A stop must abort queued motion and use documented safe hold/stop semantics, not an arbitrary torque-off; if telemetry is stale/unavailable or thresholds are exceeded, stop sending motion and alert the operator.
 - Never claim collisions or damage can be prevented with certainty. Physical inspections for cracks, bent jaws, binding and loose fasteners are still required.
 - For all code changes create a short test report, noting tests not run on hardware.
+
+## Required physical context
+Before editing motion paths or rendering a model, read `ROBOT_CONTEXT.md` and `simulation_safety/assets/preliminary_scene.json`. Use the actual upstream CAD mesh viewer (`visualization/engg1101_scene.html`) rather than generic arm art. Do not infer physical clearance from the viewer, or invent an encoder-to-CAD calibration.
