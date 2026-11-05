@@ -11,15 +11,22 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
   winget install --id Git.Git --exact --accept-package-agreements --accept-source-agreements
   $env:PATH += ";$env:ProgramFiles\Git\cmd"
 }
-if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
-  Write-Host "Installing official Codex CLI..."
-  $env:CODEX_INSTALLER_USE_RELEASES_OPENAI_COM = "false"
-  # Invoke-RestMethod returns script text; Invoke-WebRequest may return a byte array on Windows PowerShell.
-  # Use the documented official install pipeline.
-  Invoke-RestMethod "https://chatgpt.com/codex/install.ps1" | Invoke-Expression
-  $env:PATH = "$HOME\.local\bin;$HOME\.codex\bin;" + $env:PATH
+# npm is an officially supported Codex installation path, avoiding the PowerShell installer.
+if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
+  Write-Host "Installing Node.js LTS (includes npm)..."
+  if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw "Node.js/npm missing and winget unavailable. Install Node.js LTS from nodejs.org." }
+  winget install --id OpenJS.NodeJS.LTS --exact --accept-package-agreements --accept-source-agreements
+  if ($LASTEXITCODE -ne 0) { throw "Node.js installation failed." }
+  $env:PATH = "$env:ProgramFiles\nodejs;$env:APPDATA\npm;" + $env:PATH
 }
-if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { throw "Codex executable not found after installation. Restart PowerShell and retry." }
+if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { throw "npm missing. Restart PowerShell and rerun this installer." }
+if (-not (Get-Command codex.cmd -ErrorAction SilentlyContinue) -and -not (Get-Command codex.exe -ErrorAction SilentlyContinue)) {
+  Write-Host "Installing Codex using npm..."
+  & npm.cmd install --global @openai/codex
+  if ($LASTEXITCODE -ne 0) { throw "npm Codex installation failed." }
+  $env:PATH = "$env:APPDATA\npm;" + $env:PATH
+}
+if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { throw "Codex not found. Restart PowerShell and rerun." }
 if (Test-Path (Join-Path $workspace ".git")) {
   Push-Location $workspace
   try {
