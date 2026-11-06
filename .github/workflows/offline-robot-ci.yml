@@ -1,0 +1,54 @@
+name: Robot arm offline checks
+
+on:
+  push:
+    branches: [codex-pi-safe-setup]
+  pull_request:
+    branches: [codex-pi-safe-setup]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out proposed code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run simulation-only unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Preserve baseline motions and validate candidate schemas
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          root = Path('.')
+          names = [f'c{c}r{r}{kind}.json' for c in range(1, 4)
+                   for r in range(1, 4) for kind in ('m', 'p')]
+          for name in names:
+              source = root / name
+              backup = root / 'motion_audit' / 'backups' / name
+              candidate = root / 'motion_audit' / 'candidates' / name
+              assert source.read_bytes() == backup.read_bytes(), f'Original baseline changed: {name}'
+              data = json.loads(candidate.read_text())
+              assert data['schema_version'] == 1 and data['type'] == 'pose_sequence'
+              assert data['input_type'] == 'raw'
+              assert len(data['joint_order']) == 5
+              assert len(data['points']) == 2, f'Expected exactly 2 waypoints in {name}'
+              for point in data['points']:
+                  values = point['input_values']
+                  assert len(values) == 5
+                  for value in values:
+                      assert isinstance(value, (str, int))
+                      tick = int(value)
+                      assert str(tick) == str(value) and 0 <= tick <= 4095
+          print('Validated 18 candidate file schemas; originals remain unchanged.')
+          print('This is NOT a real-world collision or motor safety certification.')
+          PY
