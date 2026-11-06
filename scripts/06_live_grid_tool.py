@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Live waypoint editor and randomized playback of taught placement routes."""
+import argparse
 import importlib.util
 import json
 import random
@@ -219,7 +220,7 @@ def make_plan(paths, mode):
     return plan
 
 
-def test_grid(attack=False):
+def test_grid(attack=False, auto=False):
     refresh_attacks()
     routes = cell_routes()
     if not routes:
@@ -250,19 +251,24 @@ def test_grid(attack=False):
             validate_target(target)
     print('Order: ' + ', '.join(f'{p.stem[:-1]} {action}' for p, action in batch))
     print('One visit per square. Provide blocks for placement; set up attack squares as needed.')
-    print('No camera/block detection. Enter starts each square. Space/Q/Esc/Ctrl+C releases torque.')
+    print('No camera/block detection. ' +
+          ('AUTO: no per-square readiness pause. ' if auto else 'Enter starts each square. ') +
+          'Space/Q/Esc/Ctrl+C releases torque.')
     port, handler = connect()
     completed = False
     try:
         with RawTerminal() as terminal:
             for path, action in batch:
-                print(f'\r\n{path.stem[:-1]} {action}: clear/setup workspace, then ENTER. Stop = Space/Q/Esc/Ctrl+C.', flush=True)
-                while True:
-                    key = terminal.read_key(0.05)
-                    if key in STOP_KEYS:
-                        return
-                    if key in ('\r', '\n'):
-                        break
+                if auto:
+                    print(f'\r\n{path.stem[:-1]} {action}: AUTO START (no readiness pause).', flush=True)
+                else:
+                    print(f'\r\n{path.stem[:-1]} {action}: clear/setup workspace, then ENTER. Stop = Space/Q/Esc/Ctrl+C.', flush=True)
+                    while True:
+                        key = terminal.read_key(0.05)
+                        if key in STOP_KEYS:
+                            return
+                        if key in ('\r', '\n'):
+                            break
                 if stopped(terminal):
                     return
                 # Seed the measured pose before enabling torque.
@@ -290,6 +296,74 @@ def test_grid(attack=False):
             port.closePort()
 
 
+def run_saved_sequence(name, *, auto=False, dry_run=False):
+    """Play any saved sequence, including a newly recorded one.
+
+    --auto skips the initial confirmation. Stops remain available at all times.
+    This validates servo angle limits, not collisions or block readiness.
+    """
+    refresh_attacks()
+    matches = [(path, data) for path, data in wp.find_sequences()
+               if path.stem.lower() == name.lower()]
+    if len(matches) != 1:
+        raise ValueError(f'Unknown/ambiguous saved sequence: {name!r}')
+    path, _ = matches[0]
+    _, initial_points = wp.load_sequence(path)
+    if not initial_points:
+        raise ValueError('Sequence has no waypoints')
+    for positions in initial_points:
+        validate_target(positions)
+    print(f'Sequence: {path.stem} ({len(initial_points)} waypoints)')
+    print('Angle limits checked; collision clearance and block readiness are NOT checked.')
+    if dry_run:
+        for i, positions in enumerate(initial_points, 1):
+            print(f'{i}: ' + ' '.join(f'{joint}={positions[joint]}'
+                                     for joint in settings.JOINT_NAMES))
+        print('DRY RUN: no connection to the robot, no motion.')
+        return
+    if not auto:
+        ready = input('Clear the workspace and support the arm. Enter to START, Q to cancel: ')
+        if ready.strip().lower() == 'q':
+            return
+    else:
+        print('AUTO START requested. No additional Enter prompts.')
+    print('Stop = Space/Q/Esc/Ctrl+C (software torque release).')
+    port, handler = connect()
+    completed = False
+    try:
+        with RawTerminal() as terminal:
+            current = read_all(handler)
+            move_all_sync(handler, current, speed=300, acceleration=20)
+            if stopped(terminal):
+                return
+            enable_all_torque(handler)
+            for i in range(len(initial_points)):
+                if stopped(terminal):
+                    return
+                # Read again before each move, retaining edits made on disk.
+                if path.stem.endswith('a') and json.loads(path.read_text()).get('derived_from'):
+                    source = path.with_name(path.stem[:-1] + 'm.json')
+                    sync_attack(source)
+                _, points = wp.load_sequence(path)
+                if i >= len(points):
+                    raise ValueError('Sequence shortened during playback')
+                positions = points[i]
+                validate_target(positions)
+                print(f'\r\n{path.stem}: waypoint {i + 1}/{len(initial_points)}', flush=True)
+                move_all_sync(handler, positions, speed=300, acceleration=20)
+                if not wait_move(handler, terminal):
+                    return
+            completed = True
+        print('\nFinished. Torque remains ON to hold the final pose.')
+    finally:
+        try:
+            if not completed:
+                print('\nSTOP: releasing torque; support the arm.', flush=True)
+                disable_all_torque(handler)
+        finally:
+            port.closePort()
+
+
 def copy_current_values():
     """Print all measured servo values without changing torque or recordings."""
     port, handler = connect()
@@ -304,9 +378,22 @@ def copy_current_values():
 
 
 def main():
+    parser = argparse.ArgumentParser(description='Live robot waypoint editor and playback')
+    parser.add_argument('--sequence', metavar='NAME',
+                        help='play a saved sequence, including a newly recorded one')
+    parser.add_argument('--auto', action='store_true',
+                        help='with --sequence, skip readiness prompts')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='with --sequence, validate and print poses without connecting')
+    args = parser.parse_args()
+    if args.sequence:
+        run_saved_sequence(args.sequence, auto=args.auto, dry_run=args.dry_run)
+        return
+    if args.auto or args.dry_run:
+        parser.error('--auto and --dry-run require --sequence NAME')
     refresh_attacks()
     while True:
-        answer = input('\n1 Live record/replace  2 Random squares  3 Attack square  4 Sync ALL attacks  5 Copy current values  Q Quit: ').strip().lower()
+        answer = input('\n1 Live record/replace  2 Random squares  3 Attack square  4 Sync ALL attacks  5 Copy current values  6 Auto grid  7 Run saved sequence  Q Quit: ').strip().lower()
         try:
             if answer == 'q':
                 return
@@ -321,6 +408,16 @@ def main():
                 print(f'Synced {count} attack files from current local M/P values.')
             elif answer == '5':
                 copy_current_values()
+            elif answer == '6':
+                test_grid(auto=True)
+            elif answer == '7':
+                routes = choose()
+                selected = input('Saved sequence number to run automatically, Q to cancel: ').strip().lower()
+                if selected == 'q':
+                    continue
+                if not selected.isdigit() or not 1 <= int(selected) <= len(routes):
+                    raise ValueError('Choose a listed sequence number')
+                run_saved_sequence(routes[int(selected) - 1][0].stem, auto=True)
         except (ValueError, IndexError, OSError, RuntimeError, TimeoutError) as error:
             print(f'Error: {error}')
 
