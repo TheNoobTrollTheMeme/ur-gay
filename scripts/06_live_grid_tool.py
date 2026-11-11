@@ -64,6 +64,35 @@ def capture():
         port.closePort()
 
 
+def remove_waypoint(path, data):
+    """Remove one saved point without connecting to or moving the arm."""
+    points = data['points']
+    if len(points) <= 2:
+        print('Cannot remove: playback requires at least two waypoints. You can replace a point instead.')
+        return
+    answer = input('Waypoint number to REMOVE, Q or Enter to cancel: ').strip().lower()
+    if answer in ('', 'q'):
+        return
+    try:
+        index = int(answer) - 1
+    except ValueError:
+        print('Choose a listed waypoint number.')
+        return
+    if not 0 <= index < len(points):
+        print('No such waypoint')
+        return
+    point = points[index]
+    print(f'Waypoint {index + 1}: {point.get("input_values", point.get("positions_raw"))}')
+    confirm = input(f'Remove waypoint {index + 1} from {path.stem}? [y/N]: ').strip().lower()
+    if confirm not in ('y', 'yes'):
+        print('Removal cancelled.')
+        return
+    updated = dict(data, points=points[:index] + points[index + 1:])
+    commit(path, updated)
+    data['points'] = updated['points']
+    print(f'Removed waypoint {index + 1}. {len(data["points"])} remain; following points are renumbered.')
+
+
 def record():
     routes = choose()
     answer = input('Sequence number to edit, N for new, Q to return: ').strip().lower()
@@ -90,10 +119,17 @@ def record():
     while True:
         for i, point in enumerate(data['points'], 1):
             print(f'{i}: {point.get("input_values", point.get("positions_raw"))}')
-        choice = input('Waypoint number to REPLACE, A to append, Q to finish: ').strip().lower()
+        choice = input('Waypoint number to REPLACE, A to append, D to remove, Q to finish: ').strip().lower()
         if choice == 'q':
             return
-        index = len(data['points']) if choice == 'a' else int(choice) - 1
+        if choice == 'd':
+            remove_waypoint(path, data)
+            continue
+        try:
+            index = len(data['points']) if choice == 'a' else int(choice) - 1
+        except ValueError:
+            print('Choose a waypoint number, A, D, or Q.')
+            continue
         if not 0 <= index <= len(data['points']) or (choice != 'a' and index == len(data['points'])):
             print('No such waypoint')
             continue
@@ -393,7 +429,7 @@ def main():
         parser.error('--auto and --dry-run require --sequence NAME')
     refresh_attacks()
     while True:
-        answer = input('\n1 Live record/replace  2 Random squares  3 Attack square  4 Sync ALL attacks  5 Copy current values  6 Auto grid  7 Run saved sequence  Q Quit: ').strip().lower()
+        answer = input('\n1 Live record/replace/remove  2 Random squares  3 Attack square  4 Sync ALL attacks  5 Copy current values  6 Auto grid  7 Run saved sequence  Q Quit: ').strip().lower()
         try:
             if answer == 'q':
                 return
