@@ -15,10 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import arm_settings as settings
 from arm_helpers import (connect, disable_all_torque, enable_all_torque,
-                         read_all, position_to_angle, check_result)
+                         read_all, move_all_sync, position_to_angle, check_result)
 from terminal_keys import RawTerminal
-from gripper_guard import (VERSION as GUARD_VERSION, GripperGuard, load_config,
-                           configure as configure_gripper, inspect_gripper)
 
 spec = importlib.util.spec_from_file_location('waypoints', ROOT / 'scripts/05_waypoint_sequence.py')
 wp = importlib.util.module_from_spec(spec)
@@ -156,24 +154,17 @@ def stopped(terminal):
     return terminal.read_key(0.01) in STOP_KEYS
 
 
-def wait_move(handler, terminal, guard, timeout=15):
-    """Contact completes the gripper step, not the other four joint movements."""
+def wait_move(handler, terminal, timeout=15):
     deadline = time.monotonic() + timeout
     while True:
-        if stopped(terminal):
-            return False
-        guard.poll()
         moving = False
         for joint in settings.JOINT_NAMES:
-            if joint == 'gripper':
-                continue
             if stopped(terminal):
                 return False
             state, result, error = handler.ReadMoving(settings.SERVO_IDS[joint])
             check_result(handler, result, error, f'Read {joint} moving')
             moving |= bool(state)
-        gripper_done = guard.poll()
-        if not moving and gripper_done:
+        if not moving:
             return not stopped(terminal)
         if time.monotonic() >= deadline:
             raise TimeoutError('Move exceeded 15 seconds')
@@ -299,21 +290,16 @@ def test_grid(attack=False, auto=False):
     print('No camera/block detection. ' +
           ('AUTO: no per-square readiness pause. ' if auto else 'Enter starts each square. ') +
           'Space/Q/Esc/Ctrl+C releases torque.')
-    guard_config = load_config(ROOT, settings)
     port, handler = connect()
     completed = False
     try:
-        guard = GripperGuard(handler, settings, check_result, guard_config)
-        guard.prepare()
         with RawTerminal() as terminal:
-            armed = False
             for path, action in batch:
                 if auto:
                     print(f'\r\n{path.stem[:-1]} {action}: AUTO START (no readiness pause).', flush=True)
                 else:
                     print(f'\r\n{path.stem[:-1]} {action}: clear/setup workspace, then ENTER. Stop = Space/Q/Esc/Ctrl+C.', flush=True)
                     while True:
-                        guard.poll()
                         key = terminal.read_key(0.05)
                         if key in STOP_KEYS:
                             return
@@ -321,25 +307,22 @@ def test_grid(attack=False, auto=False):
                             break
                 if stopped(terminal):
                     return
-                # Seed only once; keep the contact latch across squares and pauses.
-                if not armed:
-                    current = read_all(handler)
-                    current['gripper'] = guard.goal
-                    guard.send(current, speed=300, acceleration=20)
-                    if stopped(terminal):
-                        return
-                    enable_all_torque(handler)
-                    armed = True
+                # Seed the measured pose before enabling torque.
+                current = read_all(handler)
+                move_all_sync(handler, current, speed=300, acceleration=20)
+                if stopped(terminal):
+                    return
+                enable_all_torque(handler)
                 targets = live_attack_targets(path) if action == 'attack' else placement_targets(path)
                 for label, positions in targets:
                     if stopped(terminal):
                         return
                     print(f'\r\n{label}', flush=True)
-                    guard.send(positions, speed=300, acceleration=20)
-                    if not wait_move(handler, terminal, guard):
+                    move_all_sync(handler, positions, speed=300, acceleration=20)
+                    if not wait_move(handler, terminal):
                         return
             completed = True
-        print('\nFinished. Torque remains ON at the final pose; gripper torque remains LIMITED.')
+        print('\nFinished. Torque remains ON to hold the final pose.')
     finally:
         try:
             if not completed:
@@ -381,16 +364,12 @@ def run_saved_sequence(name, *, auto=False, dry_run=False):
     else:
         print('AUTO START requested. No additional Enter prompts.')
     print('Stop = Space/Q/Esc/Ctrl+C (software torque release).')
-    guard_config = load_config(ROOT, settings)
     port, handler = connect()
     completed = False
     try:
-        guard = GripperGuard(handler, settings, check_result, guard_config)
-        guard.prepare()
         with RawTerminal() as terminal:
             current = read_all(handler)
-            current['gripper'] = guard.goal
-            guard.send(current, speed=300, acceleration=20)
+            move_all_sync(handler, current, speed=300, acceleration=20)
             if stopped(terminal):
                 return
             enable_all_torque(handler)
@@ -407,11 +386,11 @@ def run_saved_sequence(name, *, auto=False, dry_run=False):
                 positions = points[i]
                 validate_target(positions)
                 print(f'\r\n{path.stem}: waypoint {i + 1}/{len(initial_points)}', flush=True)
-                guard.send(positions, speed=300, acceleration=20)
-                if not wait_move(handler, terminal, guard):
+                move_all_sync(handler, positions, speed=300, acceleration=20)
+                if not wait_move(handler, terminal):
                     return
             completed = True
-        print('\nFinished. Torque remains ON at the final pose; gripper torque remains LIMITED.')
+        print('\nFinished. Torque remains ON to hold the final pose.')
     finally:
         try:
             if not completed:
@@ -443,7 +422,6 @@ def main():
     parser.add_argument('--dry-run', action='store_true',
                         help='with --sequence, validate and print poses without connecting')
     args = parser.parse_args()
-    print(f'Script 6: {GUARD_VERSION}. Playback requires verified gripper setup (menu 8).')
     if args.sequence:
         run_saved_sequence(args.sequence, auto=args.auto, dry_run=args.dry_run)
         return
@@ -451,7 +429,7 @@ def main():
         parser.error('--auto and --dry-run require --sequence NAME')
     refresh_attacks()
     while True:
-        answer = input('\n1 Live record/replace/remove  2 Random squares  3 Attack square  4 Sync ALL attacks  5 Copy current values  6 Auto grid  7 Run saved sequence  8 Gripper setup  9 Gripper telemetry (read only)  Q Quit: ').strip().lower()
+        answer = input('\n1 Live record/replace/remove  2 Random squares  3 Attack square  4 Sync ALL attacks  5 Copy current values  6 Auto grid  7 Run saved sequence  Q Quit: ').strip().lower()
         try:
             if answer == 'q':
                 return
@@ -468,10 +446,6 @@ def main():
                 copy_current_values()
             elif answer == '6':
                 test_grid(auto=True)
-            elif answer == '8':
-                configure_gripper(ROOT, settings)
-            elif answer == '9':
-                inspect_gripper(connect, settings, check_result)
             elif answer == '7':
                 routes = choose()
                 selected = input('Saved sequence number to run automatically, Q to cancel: ').strip().lower()
