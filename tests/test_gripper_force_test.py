@@ -503,5 +503,74 @@ class ExistingLimitsTests(unittest.TestCase):
             self.assertEqual(source.read_text(), "not-json")
 
 
+class GeometryDiagnosticTests(unittest.TestCase):
+    def limited_settings(self, direction=1):
+        setting = settings()
+        setting.ANGLE_LIMITS["gripper"] = (-90, 90)
+        setting.DIRECTIONS["gripper"] = direction
+        return setting
+
+    def test_closed_endpoint_outside_angle_limit_reports_which_value_and_raw_bound(self):
+        setting = self.limited_settings()
+        cfg = trial.TrialConfig(1979, 3073)
+        self.assertEqual(trial.position_angle(setting, 3073), 90.087890625)
+        with self.assertRaises(ValueError) as caught:
+            cfg.validate(setting)
+        message = str(caught.exception)
+        self.assertIn("CLOSED", message)
+        self.assertIn("3073", message)
+        self.assertIn("90.087", message)
+        self.assertIn("3072", message)
+        self.assertEqual(cfg.closed_ticks, 3073)  # Reporting must not silently clamp it.
+
+    def test_negative_direction_identifies_the_correct_endpoint(self):
+        setting = self.limited_settings(direction=-1)
+        self.assertEqual(trial.position_angle(setting, 3073), -90.087890625)
+        for open_ticks, closed_ticks, label in ((1979, 3073, "CLOSED"),
+                                               (3073, 1979, "OPEN")):
+            with self.subTest(label=label):
+                with self.assertRaises(ValueError) as caught:
+                    trial.TrialConfig(open_ticks, closed_ticks).validate(setting)
+                message = str(caught.exception)
+                self.assertIn(label, message)
+                self.assertIn("3073", message)
+                self.assertIn("-90.087", message)
+                self.assertIn("3072", message)
+
+    def run_check(self, closed_ticks):
+        original_import = __import__
+
+        def guarded_import(name, *args, **kwargs):
+            if name.split(".")[0] in {"arm_helpers", "terminal_keys"}:
+                raise AssertionError(f"--check imported hardware module {name}")
+            return original_import(name, *args, **kwargs)
+
+        with patch.dict(sys.modules, {"arm_settings": self.limited_settings()}), \
+                patch("builtins.__import__", side_effect=guarded_import), \
+                patch.object(sys.stdin, "isatty", side_effect=AssertionError("--check requires TTY")), \
+                patch("sys.stdout", new_callable=io.StringIO) as output:
+            result = trial.main(["--open", "1979", "--closed", str(closed_ticks), "--check"])
+        return result, output.getvalue()
+
+    def test_check_reports_both_invalid_endpoints_and_raw_range_without_hardware(self):
+        result, output = self.run_check(3073)
+        self.assertEqual(result, 1)
+        self.assertIn("OPEN", output)
+        self.assertIn("CLOSED", output)
+        self.assertIn("1979", output)
+        self.assertIn("3073", output)
+        self.assertIn("-6.064", output)
+        self.assertIn("90.087", output)
+        self.assertIn("1024", output)
+        self.assertIn("3072", output)
+
+    def test_check_accepts_boundary_endpoint_without_hardware_or_tty(self):
+        result, output = self.run_check(3072)
+        self.assertEqual(result, 0)
+        self.assertIn("1979", output)
+        self.assertIn("3072", output)
+        self.assertIn("1024", output)
+
+
 if __name__ == "__main__":
     unittest.main()

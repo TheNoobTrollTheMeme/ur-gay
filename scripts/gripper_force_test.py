@@ -38,6 +38,40 @@ class TrialError(RuntimeError):
     """A test could not proceed with its stated experimental limits."""
 
 
+def position_angle(settings, ticks):
+    """Convert a raw position using the installed arm's calibration."""
+    return ((ticks - settings.ZERO_TICKS["gripper"]) * 360.0 /
+            (settings.DIRECTIONS["gripper"] * settings.TICKS_PER_REVOLUTION))
+
+
+def _allowed_raw_interval(settings):
+    lo, hi = settings.ANGLE_LIMITS["gripper"]
+    # Use exactly the same comparison as validation, including at integer edges
+    # and for reversed servos. This is a diagnostic; it never changes endpoints.
+    allowed = [ticks for ticks in range(4096)
+               if lo <= position_angle(settings, ticks) <= hi]
+    return f"{allowed[0]}..{allowed[-1]}" if allowed else "none in 0..4095"
+
+
+def geometry_summary(settings, config):
+    """Describe supplied endpoints without importing hardware helpers."""
+    lo, hi = settings.ANGLE_LIMITS["gripper"]
+    lines = [
+        f"Settings: {getattr(settings, '__file__', '(module path unavailable)')}",
+        f"Gripper servo ID: {settings.SERVO_IDS['gripper']}",
+        f"Calibration: zero={settings.ZERO_TICKS['gripper']}, "
+        f"direction={settings.DIRECTIONS['gripper']}, "
+        f"ticks/revolution={settings.TICKS_PER_REVOLUTION}",
+        f"Configured angle limits: {lo}..{hi} degrees (inclusive)",
+        f"Configured raw interval: {_allowed_raw_interval(settings)} (inclusive)",
+    ]
+    for label, ticks in (("OPEN", config.open_ticks), ("CLOSED", config.closed_ticks)):
+        angle = position_angle(settings, ticks)
+        status = "OK" if 0 <= ticks <= 4095 and lo <= angle <= hi else "OUTSIDE LIMITS"
+        lines.append(f"{label}: raw={ticks}, angle={angle:.12g} degrees -- {status}")
+    return lines
+
+
 @dataclass(frozen=True)
 class TrialConfig:
     open_ticks: int
@@ -61,12 +95,17 @@ class TrialConfig:
         if (len(ids) != len(set(ids)) or
                 any(type(sid) is not int or not 1 <= sid <= 253 for sid in ids)):
             raise ValueError("Servo IDs must be valid and unique.")
-        for ticks in (self.open_ticks, self.closed_ticks):
-            angle = ((ticks - settings.ZERO_TICKS["gripper"]) * 360.0 /
-                     (settings.DIRECTIONS["gripper"] * settings.TICKS_PER_REVOLUTION))
-            lo, hi = settings.ANGLE_LIMITS["gripper"]
+        lo, hi = settings.ANGLE_LIMITS["gripper"]
+        errors = []
+        for label, ticks in (("OPEN", self.open_ticks), ("CLOSED", self.closed_ticks)):
+            angle = position_angle(settings, ticks)
             if not lo <= angle <= hi:
-                raise ValueError("Endpoint is outside existing gripper angle limits.")
+                errors.append(f"{label} endpoint {ticks} maps to {angle:.12g} degrees, "
+                              f"outside configured [{lo}, {hi}] degrees")
+        if errors:
+            raise ValueError("; ".join(errors) + ". Configured raw interval: " +
+                             _allowed_raw_interval(settings) +
+                             ". Run with --check for the loaded calibration.")
         return self
 
 
@@ -355,16 +394,32 @@ def main(argv=None):
                         help="Measured empty closed position before the hard stop")
     parser.add_argument("--cap", type=int, default=50,
                         help="Experimental output cap 1..50/1000 (default 50; never auto-raised)")
+    parser.add_argument("--check", action="store_true",
+                        help="Print endpoint/calibration checks only; no serial connection or motion")
     args = parser.parse_args(argv)
-    # The installed arm modules are loaded only for an actual CLI run.
+    # The diagnostic path needs only settings: no SDK, serial port, or terminal.
     import arm_settings as settings
-    from arm_helpers import connect, check_result
-    from terminal_keys import RawTerminal
+
+    config = TrialConfig(args.open_ticks, args.closed_ticks, args.cap)
+    if args.check:
+        print("GRIPPER ENDPOINT CHECK -- no serial connection or movement.")
+        try:
+            for line in geometry_summary(settings, config):
+                print(line)
+            config.validate(settings)
+        except (ValueError, KeyError, AttributeError, TypeError, ZeroDivisionError) as error:
+            print(f"CHECK FAILED: {error}")
+            return 1
+        print("Endpoint configuration is valid. Physical clearance and force are not tested.")
+        return 0
 
     port = None
     tester = None
     try:
-        config = TrialConfig(args.open_ticks, args.closed_ticks, args.cap).validate(settings)
+        config.validate(settings)
+        from arm_helpers import connect, check_result
+        from terminal_keys import RawTerminal
+
         if not sys.stdin.isatty():
             raise TrialError("Run this test in an interactive terminal so stop keys work.")
         print("GRIPPER-ONLY RESISTANCE TRIAL -- no calibration or recordings are changed.")

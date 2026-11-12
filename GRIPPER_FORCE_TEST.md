@@ -12,6 +12,14 @@ python3 scripts/gripper_force_test.py --open 1979 --closed 3073
 
 The endpoints above are the manually measured positions for this repaired gripper: open enough for the wide cylinder, and empty closed at light pad contact. They do not establish that the wider dumbbell orientation will fit.
 
+If an endpoint is rejected by the installed angle limits, inspect the exact mapping first:
+
+```bash
+python3 scripts/gripper_force_test.py --open 1979 --closed 3073 --check
+```
+
+This prints the loaded settings path, gripper ID, zero, direction, ticks per revolution, allowed angular/raw intervals, and both supplied endpoint angles. It does not import the arm hardware helpers, require an interactive terminal, open a serial connection, or move any motor. Exit status 1 means a configuration check failed; status 0 means the configuration checks passed, not that physical clearance or force was tested. Neither mode widens limits or silently changes the supplied endpoints.
+
 Follow the two prompts:
 
 1. Keep the jaws empty and hands clear for the initial open-close-open measurement.
