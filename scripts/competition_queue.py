@@ -14,8 +14,9 @@ import time
 # documentation demonstrates larger registers, but this program does not
 # assume that the assembled arm has the same mechanical limits as the servo.
 PROFILES = {'normal': (300, 20), 'fast': (600, 35), 'turbo': (1200, 60)}
-GRIPPER_MAX_SPEED = 300
-GRIPPER_MAX_ACCEL = 20
+# Explicitly opt-in to increased gripper movement speed; default stays at 300/20.
+# These are servo command registers, not demonstrated safe mechanical speeds.
+GRIPPER_PROFILES = dict(PROFILES)
 NEAR_TICKS = 8
 TIMEOUT_SECONDS = 15.0
 STOP_KEYS = {' ', 'q', 'Q', '\x1b', '\x03'}
@@ -327,10 +328,12 @@ class InputManager:
         return not self.stopped
 
 
-def sync_targets(handler, settings, check_result, target, profile):
-    """Per-servo synchronized command with the original gripper speed ceiling."""
+def sync_targets(handler, settings, check_result, target, profile, *, gripper_profile="normal"):
+    """Synchronized movement with an independently selectable gripper profile."""
     if profile not in PROFILES:
-        raise ValueError('Unknown competition speed profile')
+        raise ValueError("Unknown competition speed profile")
+    if gripper_profile not in GRIPPER_PROFILES:
+        raise ValueError("Unknown gripper speed profile")
     speed, accel = PROFILES[profile]
     if not all(name in target for name in settings.JOINT_NAMES):
         raise ValueError('Incomplete waypoint')
@@ -338,8 +341,8 @@ def sync_targets(handler, settings, check_result, target, profile):
         raise RuntimeError('Installed servo SDK lacks per-joint SyncWritePosEx; no move sent.')
     try:
         for name in settings.JOINT_NAMES:
-            joint_speed = min(speed, GRIPPER_MAX_SPEED) if name == 'gripper' else speed
-            joint_accel = min(accel, GRIPPER_MAX_ACCEL) if name == 'gripper' else accel
+            joint_speed, joint_accel = (GRIPPER_PROFILES[gripper_profile]
+                                        if name == 'gripper' else (speed, accel))
             result = handler.SyncWritePosEx(settings.SERVO_IDS[name], target[name],
                                             joint_speed, joint_accel)
             if not result:
@@ -389,10 +392,12 @@ def wait_step(handler, terminal, manager, previous, current, following,
 
 def playback(catalog, plan, profile, *, connect, read_all, enable_all_torque,
              disable_all_torque, terminal_class, settings, check_result,
-             report=print, clock=time.monotonic, sleep=time.sleep):
+             gripper_profile='normal', report=print, clock=time.monotonic, sleep=time.sleep):
     """Execute editable pending queue. Motor commands stay in this one thread."""
     if profile not in PROFILES:
         raise ValueError('Unknown speed profile')
+    if gripper_profile not in GRIPPER_PROFILES:
+        raise ValueError('Unknown gripper speed profile')
     manager = InputManager(plan, report)
     port, handler = connect()
     completed = False
@@ -427,7 +432,8 @@ def playback(catalog, plan, profile, *, connect, read_all, enable_all_torque,
                 for index, step in enumerate(steps):
                     if not manager.poll(terminal):
                         return False
-                    sync_targets(handler, settings, check_result, step.target, profile)
+                    sync_targets(handler, settings, check_result, step.target, profile,
+                                 gripper_profile=gripper_profile)
                     prev = steps[index - 1] if index > 0 else None
                     nxt = steps[index + 1] if index + 1 < len(steps) else None
                     if not wait_step(handler, terminal, manager, prev, step, nxt,
@@ -475,7 +481,20 @@ def menu(routes, load_sequence, validate_target, *, connect, read_all,
     if speed_input not in ('', 'n', 'f', 't'):
         raise ValueError('Choose N, F or T')
     profile = {'': 'normal', 'n': 'normal', 'f': 'fast', 't': 'turbo'}[speed_input]
-    report(f'Selected {profile}: arm {PROFILES[profile]}; gripper <=300/20.')
+    gripper_input = input('Gripper N=normal 300/20 [default], F=fast 600/35, '
+                          'T=turbo 1200/60: ').strip().lower()
+    if gripper_input not in ('', 'n', 'f', 't'):
+        raise ValueError('Choose gripper N, F or T')
+    gripper_profile = {'': 'normal', 'n': 'normal', 'f': 'fast',
+                       't': 'turbo'}[gripper_input]
+    if gripper_profile != 'normal':
+        report('WARNING: faster gripper commands apply to BOTH opening and closing. '
+               'A calibrated closed pose does not limit collision/impact load.')
+        confirmation = input('Type CONFIRM to enable faster gripper, else use normal: ')
+        if confirmation.strip() != 'CONFIRM':
+            gripper_profile = 'normal'
+    report(f'Selected arm {profile} {PROFILES[profile]}; '
+           f'gripper {gripper_profile} {GRIPPER_PROFILES[gripper_profile]}.')
     report('No collision checking, automatic grip-force control or firmware overclock.')
     report('Prestart queue editor: a grab1, i 1 grab2, d 1, m 2 1, clear, l, RUN, Q.')
     while True:
@@ -493,4 +512,5 @@ def menu(routes, load_sequence, validate_target, *, connect, read_all,
                     enable_all_torque=enable_all_torque,
                     disable_all_torque=disable_all_torque,
                     terminal_class=terminal_class, settings=settings,
-                    check_result=check_result, report=report)
+                    check_result=check_result, gripper_profile=gripper_profile,
+                    report=report)
