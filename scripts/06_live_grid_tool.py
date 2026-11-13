@@ -215,11 +215,15 @@ def attack_points(path):
 
 
 def validate_target(positions):
+    """Diagnose invalid poses without altering motor limits or enabling torque."""
     for joint, value in positions.items():
         angle = position_to_angle(joint, value)
         lo, hi = settings.ANGLE_LIMITS[joint]
         if not lo <= angle <= hi:
-            raise ValueError(f'{joint} exceeds configured angle limits')
+            raise ValueError(
+                f'{joint}: raw={value}, computed_angle={angle:.2f} deg, '
+                f'allowed={lo}..{hi} deg (check this saved waypoint or '
+                'arm_settings.py calibration; safety limits unchanged)')
 
 
 def live_attack_targets(path):
