@@ -2,7 +2,8 @@
 
 Linux evdev backend. Only selects/queues already-loaded waypoint macros.
 No joystick-driven raw servo positions, no automatic collision detection.
-Hold ZR before sending A/B/Y or line-step commands. PLUS/HOME = stop.
+A queues a combined pickup+placement. B cancels waiting combos. No putting commands.
+PLUS/HOME = stop. Only READY recordings may enter the motion queue.
 
 Linux Joy-Con names, key codes, and axis ranges can differ by driver.
 Run --diagnose with torque disabled to inspect hardware mappings.
@@ -26,10 +27,18 @@ LINES = (
     ("other diagonal", ("c3r1", "c2r2", "c1r3")),
 )
 
-class SmashMapper:
-    """Convert semantic controls into abstract, testable queue actions."""
+DEFAULT_PICKUPS = tuple(f"grab{i}" for i in range(1, 7))
+SUPPLY_COLS = ("Plate B left", "Plate A center", "Plate B right")
 
-    def __init__(self):
+
+class SmashMapper:
+    """Aim with left stick, select source block with right stick or D-pad."""
+
+    def __init__(self, pickup_names=DEFAULT_PICKUPS):
+        if len(pickup_names) != 6 or any(not str(n).strip() for n in pickup_names):
+            raise ValueError("Specify exactly six nonempty pickup motion names.")
+        self.pickup_names = tuple(str(n).strip().lower() for n in pickup_names)
+        self.source_index = 0
         self.armed = False
         self.cursor = (2, 2)
         self.line_index = 0
@@ -37,6 +46,47 @@ class SmashMapper:
         self._command_state = 0
         self._command_since = 0.0
         self._electric_until = 0.0
+
+    @property
+    def pickup(self):
+        return self.pickup_names[self.source_index]
+
+    @property
+    def selection(self):
+        return (self.pickup, self.square)
+
+    def _source_notice(self):
+        col = self.source_index % 3
+        row = self.source_index // 3
+        return ("notice", f"Block {self.source_index+1}/6: "
+                f"{SUPPLY_COLS[col]}, tier {row+1}, pickup {self.pickup}")
+
+    def dpad(self, direction, pressed=True):
+        """LEFT/RIGHT cycle all six slots, UP/DOWN choose source tier."""
+        if not pressed:
+            return []
+        old = self.source_index
+        if direction == "LEFT":
+            self.source_index = (old - 1) % 6
+        elif direction == "RIGHT":
+            self.source_index = (old + 1) % 6
+        elif direction == "UP":
+            self.source_index = old % 3
+        elif direction == "DOWN":
+            self.source_index = (old % 3) + 3
+        return [self._source_notice()] if self.source_index != old else []
+
+    def right_stick(self, x, y):
+        """Right stick selects one of three supply plates and one of two tiers."""
+        if abs(x) < 0.43 and abs(y) < 0.43:
+            return []
+        column = 0 if x < -0.43 else 2 if x > 0.43 else 1
+        row = 0 if y < 0.43 else 1
+        chosen = row * 3 + column
+        if chosen == self.source_index:
+            return []
+        self.source_index = chosen
+        return [self._source_notice()]
 
     @property
     def square(self):
@@ -94,48 +144,53 @@ class SmashMapper:
         if name == "ZR":
             self.armed = pressed
             self._command_reset()
-            return [("notice", "ARMED: ZR held (target locked)"
-                     if pressed else "Disarmed")]
+            return [("notice", "Electric input ready (ZR held)" if pressed
+                     else "Electric input released")]
         if not pressed:
             return []
         if name in ("PLUS", "HOME"):
             return [("stop", None)]
+        # B is NEVER an attack: cancel the last queued combo, or clear all with ZR.
+        if name == "B":
+            self._command_reset()
+            return [("clear", None)] if self.armed else [("undo", None)]
+        if name.startswith("DPAD_"):
+            return self.dpad(name[5:], pressed)
         if name == "X" and not self.armed:
             self.line_index = (self.line_index + 1) % len(LINES)
             self.line_step = 0
             label, squares = self.line
             return [("notice", f"Line preview: {label}: {' '.join(squares)}")]
-        if not self.armed:
-            return []
         if name == "A":
             now = time.monotonic() if now is None else now
-            if self._command_state == 3 and now <= self._electric_until:
+            combo = self.selection
+            if self.armed and self._command_state == 3 and now <= self._electric_until:
                 self._command_reset()
-                return [("replace_pending", self.square + "a"),
-                        ("notice", f"ELECTRIC: counterattack {self.square} queued first")]
-            if self._command_state != 0:
+                return [("replace_pending_combo", combo),
+                        ("notice", f"ELECTRIC PLACE: {combo[0]} -> {combo[1]}")]
+            if self.armed and self._command_state != 0:
                 self._command_reset()
                 return [("notice", "Incomplete electric input: no motion queued")]
-            return [("add", self.square)]
-        if name == "B":
-            # Attacks require a token and the referee's approval outside this program.
-            self._command_reset()
-            return [("add", self.square + "a")]
-        if name == "L":
-            self._command_reset()
-            return [("replace_pending", self.square),
-                    ("notice", f"PRIORITY PLACE: {self.square}, pending combo replaced")]
-        if name == "R":
+            return [("add_combo", combo)]
+        if name == "Y":
+            return [("notice", f"Selected: block {self.source_index+1} "
+                    f"({self.pickup}) -> {self.square}. Putting disabled.")]
+        if name == "R" and self.armed:
             self._command_reset()
             return [("replace_pending", self.square + "a"),
-                    ("notice", f"PRIORITY ATTACK: {self.square}, pending combo replaced")]
-        if name == "Y":
-            return [("add", "tapinr")]
+                    ("notice", f"PRIORITY ATTACK: {self.square}; token/approval required")]
+        if name == "L" and self.armed:
+            self._command_reset()
+            return [("replace_pending_combo", self.selection),
+                    ("notice", f"PRIORITY PLACE: {self.pickup} -> {self.square}")]
+        if not self.armed:
+            return []
         if name == "X":
             label, squares = self.line
             square = squares[self.line_step]
             self.line_step = (self.line_step + 1) % 3
-            return [("add", square), ("notice", f"Line {label}: queued {square}")]
+            return [("add_combo", (self.pickup, square)),
+                    ("notice", f"Line {label}: queued {self.pickup} -> {square}")]
         if name == "MINUS":
             return [("clear", None)]
         return []
@@ -144,7 +199,7 @@ class SmashMapper:
 class JoyConGamepad:
     """Read paired controllers without blocking Competition Mode's servo loop."""
 
-    def __init__(self, *, report=print):
+    def __init__(self, *, report=print, pickup_names=DEFAULT_PICKUPS):
         try:
             from evdev import InputDevice, list_devices, ecodes
         except ImportError as exc:
@@ -154,11 +209,14 @@ class JoyConGamepad:
             ) from exc
         self.ecodes = ecodes
         self.report = report
-        self.mapper = SmashMapper()
+        self.mapper = SmashMapper(pickup_names=pickup_names)
         self.devices = []
         self.axes = {}
         self.axis_config = {}
         self.stick_source = None
+        self.right_source = None
+        self.right_codes = None
+        self.right_axes = {"x": 0., "y": 0.}
         for path in list_devices():
             device = InputDevice(path)
             name = device.name.lower()
@@ -179,9 +237,20 @@ class JoyConGamepad:
             for axis, info in abs_codes:
                 if axis in (ecodes.ABS_X, ecodes.ABS_Y, ecodes.ABS_RX, ecodes.ABS_RY):
                     self.axis_config[(device.fd, axis)] = info
+            axis_set = {axis for axis, _ in abs_codes}
+            # A separate right Joy-Con reports ABS_X/Y, while a Pro Controller
+            # normally reports its right stick on ABS_RX/RY.
+            if (("joy-con (r)" in name or "joy-con right" in name)
+                    and {ecodes.ABS_X, ecodes.ABS_Y} <= axis_set):
+                self.right_source = device.fd
+                self.right_codes = (ecodes.ABS_X, ecodes.ABS_Y)
+            elif (self.right_source is None and
+                    {ecodes.ABS_RX, ecodes.ABS_RY} <= axis_set):
+                self.right_source = device.fd
+                self.right_codes = (ecodes.ABS_RX, ecodes.ABS_RY)
             if ((self.stick_source is None or "left" in name or "(l)" in name)
-                    and any(axis in (ecodes.ABS_X, ecodes.ABS_Y)
-                            for axis, _ in abs_codes)):
+                    and {ecodes.ABS_X, ecodes.ABS_Y} <= axis_set
+                    and self.right_source != device.fd):
                 self.stick_source = device.fd
         if not self.devices:
             raise RuntimeError("No paired Joy-Con / Pro Controller input device found.")
@@ -196,15 +265,24 @@ class JoyConGamepad:
             ecodes.BTN_START: "PLUS",
             ecodes.BTN_SELECT: "MINUS",
             ecodes.BTN_MODE: "HOME",
+            ecodes.BTN_DPAD_UP: "DPAD_UP",
+            ecodes.BTN_DPAD_DOWN: "DPAD_DOWN",
+            ecodes.BTN_DPAD_LEFT: "DPAD_LEFT",
+            ecodes.BTN_DPAD_RIGHT: "DPAD_RIGHT",
         }
         # Neutral normalized stick; directions persist until a new non-neutral reading.
         self.axes = {"x": 0., "y": 0.}
-        self.report("SMASH mode: stick selects 3x3 cell; hold ZR+A place; "
-                    "ZR+B attack; X cycle line; ZR+X next line cell; "
-                    "ZR+Y tapinr; ZR+L priority place; ZR+R priority attack; "
-                    "ZR+F,D,DF+A Electric; ZR+MINUS clear pending; PLUS/HOME STOP.")
-        self.report("Only use attack after a confirmed token and referee approval. "
-                    "Controller disconnect stops playback; physical E-stop is still required.")
+        self.report("SMASH: LEFT stick aim; RIGHT stick / D-pad pick block 1..6; "
+                    "A=pickup+place combo; B=undo last pending; ZR+B=clear all; "
+                    "X=cycle lines; ZR+X=next line square; ZR+L=priority place; "
+                    "ZR+R=priority attack; ZR+F,D,DF+A=Electric PLACE; "
+                    "PLUS/HOME=STOP. NO PUTTING.")
+        self.report("A pickup+place is queued ONLY if both saved motion names exist. "
+                    "A gamepad disconnect stops playback; physical E-stop remains required.")
+        self.report("Block layout: slots 1-3 first tier, 4-6 second; "
+                    "columns Plate B left, Plate A center, Plate B right.")
+        for i, name in enumerate(self.mapper.pickup_names, 1):
+            self.report(f"Supply slot {i}: {name}")
         for dev in self.devices:
             self.report(f"Controller: {dev.name} [{dev.path}]")
 
@@ -219,7 +297,6 @@ class JoyConGamepad:
 
     def poll(self):
         events = []
-        # A disappearing /dev/input node is treated as a lost connection.
         if any(not os.path.exists(d.path) for d in self.devices):
             raise RuntimeError("Joy-Con disconnected; stop requested.")
         ready, _, _ = select.select(self.devices, [], [], 0)
@@ -229,14 +306,30 @@ class JoyConGamepad:
                     label = self.button_codes.get(event.code)
                     if label and event.value in (0, 1):
                         events.extend(self.mapper.button(label, event.value == 1))
-                elif (event.type == self.ecodes.EV_ABS and
-                      device.fd == self.stick_source and
-                      event.code in (self.ecodes.ABS_X, self.ecodes.ABS_Y)):
-                    info = self.axis_config.get((device.fd, event.code))
-                    if info is not None:
-                        direction = "x" if event.code == self.ecodes.ABS_X else "y"
-                        self.axes[direction] = self._normalize(event.value, info)
+                elif event.type == self.ecodes.EV_ABS:
+                    key = (device.fd, event.code)
+                    info = self.axis_config.get(key)
+                    if (self.right_source == device.fd and self.right_codes
+                            and event.code in self.right_codes and info):
+                        which = "x" if event.code == self.right_codes[0] else "y"
+                        self.right_axes[which] = self._normalize(event.value, info)
+                        events.extend(self.mapper.right_stick(
+                            self.right_axes["x"], self.right_axes["y"]))
+                    elif (device.fd == self.stick_source and info
+                          and event.code in (self.ecodes.ABS_X, self.ecodes.ABS_Y)):
+                        which = "x" if event.code == self.ecodes.ABS_X else "y"
+                        self.axes[which] = self._normalize(event.value, info)
                         events.extend(self.mapper.stick(self.axes["x"], self.axes["y"]))
+                    elif event.code == self.ecodes.ABS_HAT0X:
+                        if event.value < 0:
+                            events.extend(self.mapper.dpad("LEFT"))
+                        elif event.value > 0:
+                            events.extend(self.mapper.dpad("RIGHT"))
+                    elif event.code == self.ecodes.ABS_HAT0Y:
+                        if event.value < 0:
+                            events.extend(self.mapper.dpad("UP"))
+                        elif event.value > 0:
+                            events.extend(self.mapper.dpad("DOWN"))
         return events
 
     def close(self):
