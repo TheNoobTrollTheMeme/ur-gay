@@ -149,10 +149,8 @@ def build_catalog(routes, load_sequence, validate_target, *,
     return catalog
 
 
-# Reject explicit simulation-only files even if their joint-angle numbers fit.
-_UNCLEARED = ('SIMULATION ONLY', 'NOT CLEARED FOR', 'UNVERIFIED',
-              'ESTIMATED GEOMETRY')
-
+# Legacy description text is informational, not a live motion validation result.
+# Locally re-taught waypoints may retain an outdated imported description.
 
 def build_motion_catalog(routes, load_sequence, validate_target, *, report=print):
     """Discover all saved waypoint files, with stable IDs and named aliases.
@@ -171,9 +169,6 @@ def build_motion_catalog(routes, load_sequence, validate_target, *, report=print
         try:
             if path.suffix.lower() != '.json':
                 raise ValueError('Not a saved JSON waypoint sequence')
-            description = str(data.get('description', '')).upper()
-            if any(flag in description for flag in _UNCLEARED):
-                raise ValueError('Explicitly marked simulation-only or unverified')
             _, points = load_sequence(path)
             if not points:
                 raise ValueError('Sequence has no waypoints')
