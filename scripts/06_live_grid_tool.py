@@ -17,7 +17,7 @@ import arm_settings as settings
 from arm_helpers import (connect, disable_all_torque, enable_all_torque,
                          read_all, move_all_sync, position_to_angle, check_result)
 from terminal_keys import RawTerminal
-import competition_mode as competition
+import competition_queue as competition
 
 spec = importlib.util.spec_from_file_location('waypoints', ROOT / 'scripts/05_waypoint_sequence.py')
 wp = importlib.util.module_from_spec(spec)
@@ -400,48 +400,14 @@ def run_saved_sequence(name, *, auto=False, dry_run=False):
         finally:
             port.closePort()
 
-
 def competition_placements():
-    """Precompute a place-only route for responsive, bounded replay."""
-    routes = cell_routes()
-    if not routes:
-        print('No matching c#r#m / c#r#p saved route pairs.')
-        return
-    for i, path in enumerate(routes, 1):
-        print(f'{i}: {path.stem[:-1]}')
-    selected = input('Competition squares (e.g. 1 2), Enter=ALL, Q=cancel: ').strip().lower()
-    if selected == 'q':
-        return
-    try:
-        nums = list(range(1, len(routes) + 1)) if not selected else list(dict.fromkeys(int(x) for x in selected.split()))
-    except ValueError as error:
-        raise ValueError('Choose listed square numbers separated by spaces') from error
-    if not nums or any(n < 1 or n > len(routes) for n in nums):
-        raise ValueError('Choose listed square numbers')
-    # Snapshot/validate all poses before opening serial or enabling motors.
-    steps = competition.prepare_placements([routes[n - 1] for n in nums],
-                                            wp.load_sequence, validate_target)
-    continuous = sum(competition.can_look_ahead(steps[i - 1], steps[i], steps[i + 1],
-                                                settings.JOINT_NAMES)
-                     for i in range(1, len(steps) - 1))
-    print(f'{len(steps)} stored targets, {continuous} eligible for near-point transitions.')
-    print('Place-only, no attack/flick moves. Speed/acceleration remain at 300/20.')
-    print('No pauses between squares; gripper and direction changes stop at exact waypoints.')
-    print('No collision checking. Confirm every transition is clear, and support the arm.')
-    answer = input('P = preview targets, type RUN to arm, Q = cancel: ').strip().lower()
-    if answer == 'p':
-        for step in steps:
-            print(f'{step.route} point {step.number}: {step.target}')
-        return
-    if answer != 'run':
-        print('Competition cancelled.')
-        return
-    print('Space/Q/Esc/Ctrl+C stops and releases torque. Keep physical power stop accessible.')
-    competition.execute(steps, connect=connect, read_all=read_all,
-                        move_all_sync=move_all_sync, enable_all_torque=enable_all_torque,
-                        disable_all_torque=disable_all_torque, terminal_class=RawTerminal,
-                        settings=settings, check_result=check_result, stopped=stopped,
-                        wait_move=wait_move)
+    """Live editable competition queue with per-joint speed profiles."""
+    return competition.menu(
+        cell_routes(), wp.load_sequence, validate_target,
+        connect=connect, read_all=read_all,
+        enable_all_torque=enable_all_torque,
+        disable_all_torque=disable_all_torque, terminal_class=RawTerminal,
+        settings=settings, check_result=check_result)
 
 
 def copy_current_values():
