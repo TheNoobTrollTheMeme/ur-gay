@@ -99,21 +99,38 @@ class QueuePlan:
         raise ValueError('Commands: a 2, i 1 2, d 1, m 2 1, clear, l')
 
 
-def build_catalog(routes, load_sequence, validate_target):
-    """Load every candidate once and reject invalid poses before hardware connection."""
+def build_catalog(routes, load_sequence, validate_target, *,
+                  skip_invalid=False, report=print):
+    """Preflight independently; one invalid square must not block the others.
+
+    A disabled square never enters the queue catalog and cannot be commanded.
+    Preserve its original menu number so queue inputs cannot silently refer
+    to a different square. The default retains strict fail-fast semantics for
+    callers and offline tests.
+    """
     catalog = {}
     for index, move_path in enumerate(routes, 1):
-        if not move_path.stem.endswith('m'):
-            raise ValueError('Only move/place route pairs can be queued.')
-        place_path = move_path.with_name(move_path.stem[:-1] + 'p.json')
         steps = []
-        for path in (move_path, place_path):
-            _, points = load_sequence(path)
-            if not points:
-                raise ValueError(f'Empty competition sequence: {path.name}')
-            for n, point in enumerate(points, 1):
-                validate_target(point)
-                steps.append(Point(path.stem, n, dict(point)))
+        path = move_path
+        number = None
+        try:
+            if not move_path.stem.endswith('m'):
+                raise ValueError('Only move/place route pairs can be queued.')
+            place_path = move_path.with_name(move_path.stem[:-1] + 'p.json')
+            for path in (move_path, place_path):
+                _, points = load_sequence(path)
+                if not points:
+                    raise ValueError('Sequence has no waypoints.')
+                for number, point in enumerate(points, 1):
+                    validate_target(point)
+                    steps.append(Point(path.stem, number, dict(point)))
+        except (ValueError, RuntimeError, OSError, KeyError, IndexError, TypeError) as error:
+            detail = (f'{path.stem} waypoint {number}: {error}'
+                      if number is not None else f'{path.stem}: {error}')
+            if not skip_invalid:
+                raise ValueError(detail) from error
+            report(f'DISABLED square {index} ({move_path.stem[:-1]}): {detail}')
+            continue
         catalog[str(index)] = tuple(steps)
     return catalog
 
@@ -348,11 +365,18 @@ def menu(routes, load_sequence, validate_target, *, connect, read_all,
     if not routes:
         report('No move/place pairs found.')
         return
-    catalog = build_catalog(routes, load_sequence, validate_target)
-    for number, path in enumerate(routes, 1):
-        report(f'{number}: {path.stem[:-1]} ({len(catalog[str(number)])} waypoints)')
-    if len(catalog) > 9:
+    if len(routes) > 9:
         raise ValueError('Live one-key queue supports at most 9 squares.')
+    catalog = build_catalog(routes, load_sequence, validate_target,
+                            skip_invalid=True, report=report)
+    if not catalog:
+        report('No valid competition squares. Repair the listed waypoint(s) using '
+               'script 6 menu 1; nothing was sent to the motors.')
+        return
+    for number, path in enumerate(routes, 1):
+        if str(number) in catalog:
+            report(f'{number}: {path.stem[:-1]} ({len(catalog[str(number)])} waypoints) [READY]')
+    report('Only READY numbers can be queued. Disabled squares cannot be selected.')
     raw = input('Initial queue (e.g. 1 2 3; blank=empty; Q=cancel): ').strip().lower()
     if raw == 'q':
         return
