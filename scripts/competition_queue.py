@@ -83,6 +83,28 @@ class QueuePlan:
         self.pending.clear()
         self.pending.append(identifier)
 
+    def _combo_id(self, pickup_name, cell_name):
+        """Compose an atomic pickup + placement from preflight-checked recordings."""
+        first, second = self._check(pickup_name), self._check(cell_name)
+        combo_id = f"combo:{first}:{second}"
+        if combo_id not in self.catalog:
+            self.catalog[combo_id] = (tuple(self.catalog[first])
+                                      + tuple(self.catalog[second]))
+            self.labels[combo_id] = f"{self.name(first)} + {self.name(second)}"
+        return combo_id
+
+    def append_combo(self, pickup_name, cell_name):
+        self.pending.append(self._combo_id(pickup_name, cell_name))
+
+    def replace_pending_combo(self, pickup_name, cell_name):
+        identifier = self._combo_id(pickup_name, cell_name)
+        self.pending.clear()
+        self.pending.append(identifier)
+
+    def undo_pending(self):
+        """Cancel most recent waiting combo, never the active motion."""
+        return self.pending.pop() if self.pending else None
+
     def pop(self):
         return self.pending.popleft()
 
@@ -334,15 +356,25 @@ class InputManager:
                         break
                     if action == 'notice':
                         self.report(value)
-                    elif action in ('add', 'replace_pending'):
+                    elif action in ('add', 'replace_pending', 'add_combo',
+                                    'replace_pending_combo'):
                         try:
                             if action == 'replace_pending':
                                 self.plan.replace_pending(value)
+                            elif action == 'replace_pending_combo':
+                                self.plan.replace_pending_combo(*value)
+                            elif action == 'add_combo':
+                                self.plan.append_combo(*value)
                             else:
                                 self.plan.append(value)
                             self.report(self.plan.show(self.active))
-                        except ValueError as error:
+                        except (ValueError, TypeError) as error:
                             self.report(f'Smash input ignored: {error}')
+                    elif action == 'undo':
+                        undone = self.plan.undo_pending()
+                        self.report(f"Cancelled waiting {self.plan.name(undone)}."
+                                    if undone else "No waiting combo to cancel.")
+                        self.report(self.plan.show(self.active))
                     elif action == 'clear':
                         self.plan.clear()
                         self.report(self.plan.show(self.active))
@@ -454,7 +486,7 @@ def playback(catalog, plan, profile, *, connect, read_all, enable_all_torque,
                     continue
                 number = plan.pop()
                 manager.active = number
-                steps = catalog[number]  # Immutable snapshot, never loaded mid-motion.
+                steps = plan.catalog[number]  # Validated immutable action snapshot, including combos.
                 report(f'\nRunning motion {plan.name(number)} ({len(steps)} waypoints). {plan.show(number)}')
                 if not enabled:
                     measured = read_all(handler)
@@ -536,8 +568,20 @@ def menu(routes, load_sequence, validate_target, *, connect, read_all,
         raise ValueError('Choose controller K or J')
     gamepad = None
     if controller_input == 'j':
-        from smash_joycon import JoyConGamepad
-        gamepad = JoyConGamepad(report=report)
+        from smash_joycon import DEFAULT_PICKUPS, JoyConGamepad
+        report("Rulebook setup: six block locations within central Plate A and two "
+               "side Plate B areas. Arrange blocks before the game, never on the arm.")
+        pickup_raw = input('Pickup motion names for 6 slots, in order '
+                           'B-left 1/2, A-front 1/2, B-right 1/2 '
+                           '[Enter=grab1..grab6]: ').strip().lower()
+        pickup_names = tuple(pickup_raw.replace(',', ' ').split()) if pickup_raw else DEFAULT_PICKUPS
+        if len(pickup_names) != 6:
+            raise ValueError('Specify exactly six pickup motion names.')
+        for i, name in enumerate(pickup_names, 1):
+            valid = name in plan.aliases or name in plan.catalog
+            report(f"Pickup slot {i}: {name} - "
+                   + ("READY" if valid else "MISSING: cannot queue this block"))
+        gamepad = JoyConGamepad(report=report, pickup_names=pickup_names)
     report('Prestart queue editor: a grab1, i 1 grab2, d 1, m 2 1, clear, l, RUN, Q.')
     while True:
         cmd = input('queue> ').strip()
