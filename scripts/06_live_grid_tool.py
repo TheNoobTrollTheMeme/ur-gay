@@ -439,7 +439,7 @@ def main():
         parser.error('--auto and --dry-run require --sequence NAME')
     refresh_attacks()
     while True:
-        answer = input('\n1 Live record/replace/remove  2 Random squares  3 Attack square  4 Sync ALL attacks  5 Copy current values  6 Auto grid  7 Run saved sequence  8 Competition (place-only)  Q Quit: ').strip().lower()
+        answer = input('\n1 Live record/replace/remove  2 Random squares  3 Attack square  4 Sync ALL attacks  5 Copy current values  6 Auto grid  7 Run saved sequence  8 Competition queue  Q Quit: ').strip().lower()
         try:
             if answer == 'q':
                 return
