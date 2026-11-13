@@ -31,15 +31,17 @@ class SmashMappingTests(unittest.TestCase):
         self.assertEqual(mapper.selection, ("grab1", "c2r2"))
         mapper.dpad("UP")              # central Plate A, left block
         self.assertEqual(mapper.pickup, "grab3")
-        mapper.right_stick(0.9)        # central Plate A, right block
+        mapper.right_stick(0.9)         # Plate A, right block
         self.assertEqual(mapper.pickup, "grab4")
-        mapper.dpad("RIGHT")           # right Plate B, right block
+        mapper.dpad("RIGHT")            # right Plate B, right block
         self.assertEqual(mapper.pickup, "grab6")
-        mapper.right_stick(-0.9)       # right Plate B, left block
+        mapper.right_stick(-0.9)        # right Plate B, left block
         self.assertEqual(mapper.pickup, "grab5")
-        mapper.dpad("LEFT")            # left Plate B, left block
+        mapper.dpad("LEFT")             # left Plate B, left block
         self.assertEqual(mapper.pickup, "grab1")
-        self.assertEqual(mapper.dpad("DOWN"), [])  # intentionally unused
+        edge = mapper.dpad("DOWN")      # a tactical modifier, NOT plate select
+        self.assertEqual(edge[0][0], "notice")
+        self.assertEqual(mapper.pickup, "grab1")
 
     def test_selected_block_map_is_configurable(self):
         names = ("b_left1", "b_left2", "front1", "front2", "b_right1", "b_right2")
@@ -98,74 +100,71 @@ class SmashMappingTests(unittest.TestCase):
 
 
     def test_stick_x_selects_top_middle_and_bottom_rows(self):
-        mapper = sj.SmashMapper()
-        self.assertIn("middle", mapper.button("X", True)[0][1])
-        mapper.button("X", False)
-        mapper.stick(0, -0.8)
-        self.assertIn("top", mapper.button("X", True)[0][1])
-        self.assertEqual(mapper.line[1], ("c1r1", "c2r1", "c3r1"))
-        mapper.button("X", False)
-        mapper.stick(0, .8)
-        self.assertIn("bottom", mapper.button("X", True)[0][1])
-        self.assertEqual(mapper.line[1], ("c1r3", "c2r3", "c3r3"))
+        for y, expected in ((-0.9, "top"), (0.0, "middle"), (0.9, "bottom")):
+            with self.subTest(y=y):
+                mapper = sj.SmashMapper()
+                mapper.stick(0, y, now=0.0)
+                events = mapper.button("X", True, now=0.1)
+                self.assertIn(expected, events[0][1])
+                self.assertEqual(events[0][0], "notice")
 
     def test_stick_y_selects_left_center_and_right_columns(self):
-        mapper = sj.SmashMapper()
-        self.assertIn("center column", mapper.button("Y", True)[0][1])
-        mapper.stick(-0.9, 0)
-        self.assertIn("left", mapper.button("Y", True)[0][1])
-        self.assertEqual(mapper.line[1], ("c1r1", "c1r2", "c1r3"))
-        mapper.stick(.9, 0)
-        self.assertIn("right", mapper.button("Y", True)[0][1])
-        self.assertEqual(mapper.line[1], ("c3r1", "c3r2", "c3r3"))
+        # Y roulette offsets X's row choice by +3. This is NOT horizontal
+        # mirroring, which belongs only to Zanmato endpoint flicks.
+        for y, expected in ((-0.9, "left"), (0.0, "center column"),
+                            (0.9, "right")):
+            with self.subTest(y=y):
+                mapper = sj.SmashMapper()
+                mapper.stick(0, y, now=0.0)
+                events = mapper.button("Y", True, now=0.1)
+                self.assertIn(expected, events[0][1])
+                self.assertIn("OFFSET", events[0][1])
 
     def test_diagonal_x_and_y_are_offset(self):
-        mapper = sj.SmashMapper()
-        mapper.stick(-0.9, -0.9)
-        self.assertIn("main diagonal", mapper.button("X", True)[0][1])
-        mapper.button("X", False)
-        self.assertIn("other diagonal", mapper.button("Y", True)[0][1])
-        mapper.stick(.9, -.9)
-        self.assertIn("other diagonal", mapper.button("X", True)[0][1])
-        mapper.button("X", False)
-        self.assertIn("main diagonal", mapper.button("Y", True)[0][1])
+        for x, y, x_line, y_line in (
+                (-0.9, -0.9, "main diagonal", "middle"),
+                (0.9, -0.9, "other diagonal", "bottom")):
+            with self.subTest(x=x, y=y):
+                m_x = sj.SmashMapper()
+                m_x.stick(x, y, now=0.0)
+                self.assertIn(x_line, m_x.button("X", True, now=0.1)[0][1])
+                m_y = sj.SmashMapper()
+                m_y.stick(x, y, now=0.0)
+                result = m_y.button("Y", True, now=0.1)[0][1]
+                self.assertIn(y_line, result)
+                self.assertNotIn("ZANMATO", result)
 
     def test_draw_endpoint_selects_line_and_direction(self):
+        # Flick bottom-left to top-right, then press X.
         mapper = sj.SmashMapper()
-        mapper.stick(-.9, -.9)
-        mapper.button("X", True)   # Start c1r1
-        mapper.stick(.9, .9)
-        result = mapper.button("Y", True)   # Finish c3r3
-        self.assertIn("draw c1r1 to c3r3", result[0][1])
-        self.assertEqual(mapper.line[1], ("c1r1", "c2r2", "c3r3"))
-        mapper.button("X", False)
-        mapper.stick(.9, .9)
-        mapper.button("X", True)   # Start c3r3
-        mapper.stick(-.9, -.9)
-        result = mapper.button("Y", True)   # Finish c1r1
-        self.assertIn("reverse", result[0][1])
-        self.assertEqual(mapper.line[1], ("c3r3", "c2r2", "c1r1"))
+        mapper.stick(-.9, .9, now=0.1)
+        mapper.stick(.9, -.9, now=0.3)
+        event = mapper.button("X", True, now=0.4)
+        self.assertIn("ZANTETSUKEN", event[0][1])
+        self.assertEqual(mapper.line[1], ("c1r3", "c2r2", "c3r1"))
+        # Reverse flick should reverse the line's progression.
+        mapper.stick(.9, -.9, now=1.0)
+        mapper.stick(-.9, .9, now=1.2)
+        event = mapper.button("X", True, now=1.3)
+        self.assertIn("ZANTETSUKEN", event[0][1])
+        self.assertEqual(mapper.line[1], ("c3r1", "c2r2", "c1r3"))
 
     def test_draw_rejects_non_collinear_endpoints(self):
         mapper = sj.SmashMapper()
-        mapper.stick(-.9, -.9)   # c1r1
-        mapper.button("X", True)
-        mapper.stick(.9, 0.)    # c3r2 is not on a line through c1r1
-        response = mapper.button("Y", True)
-        self.assertIn("left-stick + Y", response[0][1])
-        self.assertEqual(mapper.line[0], "right")
-        mapper.button("X", False)
+        mapper.stick(-.9, -.9, now=.1)  # c1r1
+        mapper.stick(.9, 0., now=.2)    # c3r2 (not a line endpoint)
+        result = mapper.button("Y", True, now=.3)
+        self.assertIn("Y OFFSET ROULETTE", result[0][1])
+        self.assertEqual(mapper.line[0], "center column")
 
-    def test_releasing_x_cancels_draw_without_triggering_motion(self):
+    def test_old_gesture_expires_to_roulette(self):
         mapper = sj.SmashMapper()
-        mapper.stick(-.9, -.9)
-        first = mapper.button("X", True)
-        self.assertEqual(first[0][0], "notice")
-        mapper.button("X", False)
-        mapper.stick(.9, .9)
-        result = mapper.button("Y", True)
-        self.assertIn("offset", result[0][1])
-        self.assertEqual(result[0][0], "notice")
+        mapper.stick(-.9, .9, now=.1)
+        mapper.stick(.9, -.9, now=.2)
+        result = mapper.button("X", True, now=3.)
+        self.assertIn("X ROULETTE", result[0][1])
+        self.assertNotIn("ZANTETSUKEN", result[0][1])
+        self.assertEqual(mapper.line[1], ("c3r1", "c2r2", "c1r3"))
 
     def test_line_selection_does_not_enqueue_or_override_a_b(self):
         mapper = sj.SmashMapper()
@@ -175,6 +174,70 @@ class SmashMappingTests(unittest.TestCase):
         self.assertEqual(mapper.button("A", True),
                          [("add_combo", ("grab1", "c2r1"))])
         self.assertEqual(mapper.button("B", True), [("undo", None)])
+
+    def test_zanmato_horizontally_mirrors_complete_swipe(self):
+        mapper = sj.SmashMapper()
+        mapper.stick(-.9, .9, now=.1)      # bottom-left start
+        mapper.stick(.9, -.9, now=.3)      # top-right finish
+        events = mapper.button("Y", True, now=.4)
+        self.assertIn("ZANMATO", events[0][1])
+        self.assertEqual(mapper.line[1], ("c3r3", "c2r2", "c1r1"))
+
+    def test_zanmato_mirrors_horizontal_and_vertical_lines(self):
+        a = sj.SmashMapper()
+        a.stick(-.9, -.9, now=.1)
+        a.stick(.9, -.9, now=.2)
+        self.assertIn("ZANMATO", a.button("Y", True, now=.3)[0][1])
+        self.assertEqual(a.line[1], ("c3r1", "c2r1", "c1r1"))
+        b = sj.SmashMapper()
+        b.stick(-.9, -.9, now=.1)
+        b.stick(-.9, .9, now=.2)
+        self.assertIn("ZANMATO", b.button("Y", True, now=.3)[0][1])
+        self.assertEqual(b.line[1], ("c3r1", "c3r2", "c3r3"))
+
+    def test_edge_first_and_L_produce_four_orders(self):
+        mapper = sj.SmashMapper()
+        mapper.button("X", True) # neutral, middle row
+        self.assertEqual(mapper.line[1], ("c1r2", "c2r2", "c3r2"))
+        mapper.dpad("DOWN")
+        self.assertEqual(mapper.line[1], ("c1r2", "c3r2", "c2r2"))
+        mapper.button("L", True)
+        self.assertEqual(mapper.line[1], ("c3r2", "c1r2", "c2r2"))
+        mapper.dpad("DOWN")
+        self.assertEqual(mapper.line[1], ("c3r2", "c2r2", "c1r2"))
+        mapper.button("L", False)
+
+    def test_edge_first_works_on_diagonal_corners(self):
+        mapper = sj.SmashMapper()
+        mapper.stick(-.9, -.9, now=.1)
+        mapper.button("X", True, now=.2)
+        mapper.dpad("DOWN")
+        self.assertEqual(mapper.line[1], ("c1r1", "c3r3", "c2r2"))
+        mapper.button("L", True)
+        self.assertEqual(mapper.line[1], ("c3r3", "c1r1", "c2r2"))
+
+    def test_L_modifier_reverses_new_line_selection(self):
+        mapper = sj.SmashMapper()
+        mapper.button("L", True)
+        mapper.stick(0, -.9, now=.1)
+        result = mapper.button("X", True, now=.2)
+        self.assertIn("top", result[0][1])
+        self.assertEqual(mapper.line[1], ("c3r1", "c2r1", "c1r1"))
+        mapper.button("L", False)
+        mapper.stick(0, 0.0, now=1.)
+        mapper.button("X", True, now=1.1)
+        self.assertEqual(mapper.line[1], ("c1r2", "c2r2", "c3r2"))
+
+    def test_line_selection_does_not_enqueue_motion(self):
+        mapper = sj.SmashMapper()
+        mapper.stick(-.9, .9, now=.1)
+        mapper.stick(.9, -.9, now=.2)
+        result = mapper.button("X", True, now=.3)
+        self.assertEqual([kind for kind, _ in result], ["notice"])
+        mapper.dpad("DOWN")
+        mapper.button("L", True)
+        self.assertEqual(mapper.button("B", True), [("undo", None)])
+        self.assertEqual(mapper.button("PLUS", True), [("stop", None)])
 
     def test_electric_input_prioritizes_full_combo_not_attack(self):
         mapper = sj.SmashMapper()
@@ -196,13 +259,15 @@ class SmashMappingTests(unittest.TestCase):
         self.assertEqual(mapper.button("A", True)[0],
                          ("add_combo", ("grab1", "c2r2")))
 
-    def test_priority_place_and_attack_are_distinct(self):
+    def test_L_reverse_and_attack_are_distinct(self):
         mapper = sj.SmashMapper()
+        mapper.button("X", True)       # middle row
         mapper.dpad("RIGHT")
         mapper.right_stick(.9)
         mapper.button("ZR", True)
-        self.assertEqual(mapper.button("L", True)[0],
-                         ("replace_pending_combo", ("grab6", "c2r2")))
+        event = mapper.button("L", True)
+        self.assertIn("L REVERSE", event[0][1])
+        self.assertEqual(mapper.line[1], ("c3r2", "c2r2", "c1r2"))
         self.assertEqual(mapper.button("R", True)[0],
                          ("replace_pending", "c2r2a"))
 
