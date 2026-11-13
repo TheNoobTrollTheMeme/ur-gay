@@ -77,6 +77,12 @@ class QueuePlan:
     def clear(self):
         self.pending.clear()
 
+    def replace_pending(self, action):
+        """Validate first, then replace all waiting moves, never the active one."""
+        identifier = self._check(action)
+        self.pending.clear()
+        self.pending.append(identifier)
+
     def pop(self):
         return self.pending.popleft()
 
@@ -328,9 +334,12 @@ class InputManager:
                         break
                     if action == 'notice':
                         self.report(value)
-                    elif action == 'add':
+                    elif action in ('add', 'replace_pending'):
                         try:
-                            self.plan.append(value)
+                            if action == 'replace_pending':
+                                self.plan.replace_pending(value)
+                            else:
+                                self.plan.append(value)
                             self.report(self.plan.show(self.active))
                         except ValueError as error:
                             self.report(f'Smash input ignored: {error}')
