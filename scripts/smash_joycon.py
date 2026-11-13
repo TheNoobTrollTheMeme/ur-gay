@@ -44,7 +44,7 @@ class SmashMapper:
         self.line_index = 0
         self.line_step = 0
         self._line_reversed = False
-        self._edge_first = False
+        self._middle_first = False
         self._reverse_held = False
         self._line_aim = (0, 0)
         self._gesture_start = None
@@ -69,13 +69,13 @@ class SmashMapper:
                 f"{SUPPLY_PLATES[plate]}, {side}, pickup {self.pickup}")
 
     def dpad(self, direction, pressed=True):
-        """LEFT/UP/RIGHT selects supply plate. DOWN toggles line endpoints-first."""
+        """LEFT/UP/RIGHT selects supply plate. DOWN toggles midpoint-first order."""
         if not pressed:
             return []
         if direction == "DOWN":
-            self._edge_first = not self._edge_first
+            self._middle_first = not self._middle_first
             self.line_step = 0
-            return [("notice", "ENDPOINTS FIRST: 1-3-2" if self._edge_first
+            return [("notice", "MIDDLE FIRST: 2-1-3" if self._middle_first
                      else "NORMAL LINE ORDER: 1-2-3")]
         plate = {"LEFT": 0, "UP": 1, "RIGHT": 2}.get(direction)
         if plate is None:
@@ -105,10 +105,11 @@ class SmashMapper:
     def line(self):
         label, original = LINES[self.line_index]
         cells = tuple(reversed(original)) if self._line_reversed else original
-        if self._edge_first:
-            # "Edge first" means both OUTER line positions before the midpoint.
-            # Normal: 1-3-2. With L reverse: 3-1-2. Includes diagonal corners.
-            cells = (cells[0], cells[2], cells[1])
+        if self._middle_first:
+            # D-pad DOWN: midpoint -> first endpoint -> opposite endpoint.
+            # Combined with L reverse: midpoint -> opposite endpoint -> first.
+            # Works for rows, columns and diagonals.
+            cells = (cells[1], cells[0], cells[2])
         return label, cells
 
     def _line_notice(self, method):
@@ -379,8 +380,8 @@ class JoyConGamepad:
         self.report("SMASH: LEFT stick aims. Two endpoint flicks + X=ZANTETSUKEN; "
                     "two flicks + Y=ZANMATO (horizontal mirror); "
                     "one direction + X=X roulette; one direction + Y=offset +3 "
-                    "roulette (NOT mirror). L=reverse; D-pad DOWN=outer "
-                    "endpoints first; L+DOWN combines. "
+                    "roulette (NOT mirror). L=reverse; D-pad DOWN=middle "
+                    "first; L+DOWN combines. "
                     "D-pad LEFT/UP/RIGHT selects B-left/A-front/B-right plate; "
                     "RIGHT stick L/R picks its block. A=pickup+place; "
                     "B=undo; ZR+B=clear; ZR+X=queue next line cell; "
