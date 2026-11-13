@@ -44,8 +44,12 @@ class SmashMapper:
         self.line_index = 0
         self.line_step = 0
         self._line_reversed = False
+        self._edge_first = False
+        self._reverse_held = False
         self._line_aim = (0, 0)
-        self._draw_start = None
+        self._gesture_start = None
+        self._gesture_end = None
+        self._gesture_since = 0.0
         self._command_state = 0
         self._command_since = 0.0
         self._electric_until = 0.0
@@ -65,9 +69,14 @@ class SmashMapper:
                 f"{SUPPLY_PLATES[plate]}, {side}, pickup {self.pickup}")
 
     def dpad(self, direction, pressed=True):
-        """D-pad LEFT/UP/RIGHT selects Plate B-left / Plate A / Plate B-right."""
+        """LEFT/UP/RIGHT selects supply plate. DOWN toggles line endpoints-first."""
         if not pressed:
             return []
+        if direction == "DOWN":
+            self._edge_first = not self._edge_first
+            self.line_step = 0
+            return [("notice", "ENDPOINTS FIRST: 1-3-2" if self._edge_first
+                     else "NORMAL LINE ORDER: 1-2-3")]
         plate = {"LEFT": 0, "UP": 1, "RIGHT": 2}.get(direction)
         if plate is None:
             return []
@@ -94,40 +103,65 @@ class SmashMapper:
 
     @property
     def line(self):
-        label, cells = LINES[self.line_index]
-        return label, tuple(reversed(cells)) if self._line_reversed else cells
+        label, original = LINES[self.line_index]
+        cells = tuple(reversed(original)) if self._line_reversed else original
+        if self._edge_first:
+            # "Edge first" means both OUTER line positions before the midpoint.
+            # Normal: 1-3-2. With L reverse: 3-1-2. Includes diagonal corners.
+            cells = (cells[0], cells[2], cells[1])
+        return label, cells
 
-    def _select_line(self, index, *, reverse=False, method="stick"):
-        self.line_index = index
-        self._line_reversed = reverse
-        self.line_step = 0
+    def _line_notice(self, method):
         label, cells = self.line
-        direction = " reverse" if reverse else ""
-        return [("notice", f"LINE {label}{direction} ({method}): "
-                + " -> ".join(cells))]
+        return [("notice", f"{method}: LINE {label}: " + " -> ".join(cells))]
+
+    def _select_line(self, index, *, reverse=False, method="roulette"):
+        self.line_index = index
+        self._line_reversed = bool(reverse) != self._reverse_held
+        self.line_step = 0
+        self._gesture_start = None
+        self._gesture_end = None
+        return self._line_notice(method)
 
     def _line_from_aim(self, button):
-        """Row/column selection; diagonals have an intentional X/Y offset."""
+        """X = row/diagonal roulette; Y = offset +3, deliberately NOT mirror."""
         dx, dy = self._line_aim
         if dx and dy:
-            main = dx == dy  # NW-SE is main; NE-SW is the other.
-            if button == "Y":
-                main = not main  # Y selects the offset/opposite diagonal.
-            return 6 if main else 7
-        if button == "X":
-            return {-1: 0, 0: 1, 1: 2}[dy]  # top/middle/bottom rows
-        return {-1: 3, 0: 4, 1: 5}[dx]  # left/center/right columns
+            original = 6 if dx == dy else 7
+        else:
+            original = {-1: 0, 0: 1, 1: 2}[dy]
+        # +3 maps X's three rows to Y's three columns, but diagonal inputs
+        # map to non-mirrored rows. No deceptive claims of on-screen output.
+        return (original + 3) % 8 if button == "Y" else original
 
-    def _drawn_line(self, start, end):
-        """Two endpoints define a unique row, column, or diagonal."""
-        if start == end:
-            return None
+    @staticmethod
+    def _hmirror(square):
+        """Horizontal mirror swaps the left and right rack columns."""
+        col = int(square[1])
+        return f"c{4-col}{square[2:]}"
+
+    @staticmethod
+    def _resolve_endpoints(start, end):
         for index, (_, cells) in enumerate(LINES):
-            if start in cells and end in cells:
-                return self._select_line(index,
-                        reverse=cells.index(start) > cells.index(end),
-                        method=f"draw {start} to {end}")
+            if start == cells[0] and end == cells[-1]:
+                return index, False
+            if start == cells[-1] and end == cells[0]:
+                return index, True
         return None
+
+    def _choose_line(self, button):
+        if self._gesture_start and self._gesture_end:
+            start, end = self._gesture_start, self._gesture_end
+            if button == "Y":
+                start, end = self._hmirror(start), self._hmirror(end)
+            result = self._resolve_endpoints(start, end)
+            if result is not None:
+                index, reverse = result
+                return self._select_line(index, reverse=reverse,
+                    method=("ZANTETSUKEN" if button == "X" else "ZANMATO"))
+        return self._select_line(self._line_from_aim(button),
+                    method=("X ROULETTE" if button == "X" else
+                            "Y OFFSET ROULETTE (+3)"))
 
     def _command_reset(self):
         self._command_state = 0
@@ -141,11 +175,21 @@ class SmashMapper:
         This is an OPTIONAL quick counter, not a servo-speed modifier.
         """
         x, y = max(-1., min(1., x)), max(-1., min(1., y))
+        now = time.monotonic() if now is None else now
         if not self.armed:
             threshold = .43
             dx = 1 if x > threshold else (-1 if x < -threshold else 0)
             dy = 1 if y > threshold else (-1 if y < -threshold else 0)
             self._line_aim = (dx, dy)
+            if dx or dy:
+                new_square = f"c{2+dx}r{2+dy}"
+                if (self._gesture_start is None or
+                        now - self._gesture_since > 1.5):
+                    self._gesture_start = new_square
+                    self._gesture_end = None
+                    self._gesture_since = now
+                elif new_square != self._gesture_start:
+                    self._gesture_end = new_square
         if self.armed:
             now = time.monotonic() if now is None else now
             if x > 0.55 and abs(y) < 0.35:
@@ -182,12 +226,14 @@ class SmashMapper:
         if name == "ZR":
             self.armed = pressed
             self._command_reset()
-            if pressed:
-                self._draw_start = None
             return [("notice", "Electric input ready (ZR held)" if pressed
                      else "Electric input released")]
-        if name == "X" and not pressed:
-            self._draw_start = None
+        if name == "L":
+            self._reverse_held = pressed
+            if pressed:
+                self._line_reversed = not self._line_reversed
+                self.line_step = 0
+                return self._line_notice("L REVERSE")
             return []
         if not pressed:
             return []
@@ -199,20 +245,10 @@ class SmashMapper:
             return [("clear", None)] if self.armed else [("undo", None)]
         if name.startswith("DPAD_"):
             return self.dpad(name[5:], pressed)
-        if name == "X" and not self.armed:
-            # Tap = direct stick+X selection. Hold X and tap Y at another
-            # endpoint for freehand line drawing. Neither sends a motor command.
-            self._draw_start = self.square
-            return self._select_line(self._line_from_aim("X"),
-                                     method="left-stick + X")
-        if name == "Y" and not self.armed:
-            if self._draw_start is not None:
-                drawn = self._drawn_line(self._draw_start, self.square)
-                if drawn is not None:
-                    self._draw_start = None
-                    return drawn
-            return self._select_line(self._line_from_aim("Y"),
-                                     method="left-stick + Y (offset)")
+        if name in ("X", "Y") and not self.armed:
+            # Two endpoint flicks = Zantetsuken / horizontally mirrored Zanmato.
+            # One directional input = X/Y roulette. Selection never moves robot.
+            return self._choose_line(name)
         if name == "A":
             now = time.monotonic() if now is None else now
             combo = self.selection
@@ -233,10 +269,6 @@ class SmashMapper:
             self._command_reset()
             return [("replace_pending", self.square + "a"),
                     ("notice", f"PRIORITY ATTACK: {self.square}; token/approval required")]
-        if name == "L" and self.armed:
-            self._command_reset()
-            return [("replace_pending_combo", self.selection),
-                    ("notice", f"PRIORITY PLACE: {self.pickup} -> {self.square}")]
         if not self.armed:
             return []
         if name == "X":
@@ -328,15 +360,15 @@ class JoyConGamepad:
         }
         # Neutral normalized stick; directions persist until a new non-neutral reading.
         self.axes = {"x": 0., "y": 0.}
-        self.report("SMASH: LEFT stick aims; D-pad LEFT/UP/RIGHT selects "
-                    "Plate B-left / Plate A-front / Plate B-right; RIGHT stick "
-                    "LEFT/RIGHT selects one of two blocks per plate. "
-                    "A=pickup+place; B=undo; ZR+B=clear; "
-                    "stick+X=row or diagonal; stick+Y=column or offset diagonal; "
-                    "hold X at start, move stick, tap Y=draw winning line; "
-                    "ZR+X=queue next square of selected line; "
-                    "ZR+L=priority place; ZR+R=priority attack; "
-                    "PLUS/HOME=STOP. NO PUTTING.")
+        self.report("SMASH: LEFT stick aims. Two endpoint flicks + X=ZANTETSUKEN; "
+                    "two flicks + Y=ZANMATO (horizontal mirror); "
+                    "one direction + X=X roulette; one direction + Y=offset +3 "
+                    "roulette (NOT mirror). L=reverse; D-pad DOWN=outer "
+                    "endpoints first; L+DOWN combines. "
+                    "D-pad LEFT/UP/RIGHT selects B-left/A-front/B-right plate; "
+                    "RIGHT stick L/R picks its block. A=pickup+place; "
+                    "B=undo; ZR+B=clear; ZR+X=queue next line cell; "
+                    "ZR+R=priority attack; PLUS/HOME=STOP. NO PUTTING.")
         self.report("A pickup+place is queued ONLY if both saved motion names exist. "
                     "A gamepad disconnect stops playback; physical E-stop remains required.")
         self.report("Block setup: slots 1-2 Plate B-left, 3-4 Plate A-front, "
