@@ -279,8 +279,9 @@ class KeyInput:
 
 
 class InputManager:
-    def __init__(self, plan, reporter=print):
+    def __init__(self, plan, reporter=print, *, gamepad=None):
         self.plan = plan
+        self.gamepad = gamepad
         self.keys = KeyInput()
         self.report = reporter
         self.stopped = False
@@ -317,6 +318,30 @@ class InputManager:
             self.report(f'Queue edit ignored: {error}')
 
     def poll(self, terminal):
+        # Gamepad events and keyboard stop are handled in the existing servo loop.
+        # A dropped Bluetooth connection fails closed rather than replaying input.
+        if self.gamepad is not None:
+            try:
+                for action, value in self.gamepad.poll():
+                    if action == 'stop':
+                        self.stopped = True
+                        break
+                    if action == 'notice':
+                        self.report(value)
+                    elif action == 'add':
+                        try:
+                            self.plan.append(value)
+                            self.report(self.plan.show(self.active))
+                        except ValueError as error:
+                            self.report(f'Smash input ignored: {error}')
+                    elif action == 'clear':
+                        self.plan.clear()
+                        self.report(self.plan.show(self.active))
+            except (OSError, RuntimeError) as error:
+                self.report(f'CONTROLLER LOST: {error}; stopping motion.')
+                self.stopped = True
+        if self.stopped:
+            return False
         # Consume a handful of already-typed keys without blocking feedback.
         for _ in range(16):
             key = terminal.read_key(0.0)
@@ -392,13 +417,14 @@ def wait_step(handler, terminal, manager, previous, current, following,
 
 def playback(catalog, plan, profile, *, connect, read_all, enable_all_torque,
              disable_all_torque, terminal_class, settings, check_result,
-             gripper_profile='normal', report=print, clock=time.monotonic, sleep=time.sleep):
+             gripper_profile='normal', gamepad=None, report=print,
+             clock=time.monotonic, sleep=time.sleep):
     """Execute editable pending queue. Motor commands stay in this one thread."""
     if profile not in PROFILES:
         raise ValueError('Unknown speed profile')
     if gripper_profile not in GRIPPER_PROFILES:
         raise ValueError('Unknown gripper speed profile')
-    manager = InputManager(plan, report)
+    manager = InputManager(plan, report, gamepad=gamepad)
     port, handler = connect()
     completed = False
     enabled = False
@@ -496,6 +522,13 @@ def menu(routes, load_sequence, validate_target, *, connect, read_all,
     report(f'Selected arm {profile} {PROFILES[profile]}; '
            f'gripper {gripper_profile} {GRIPPER_PROFILES[gripper_profile]}.')
     report('No collision checking, automatic grip-force control or firmware overclock.')
+    controller_input = input('Controller K=keyboard [default], J=Joy-Con Smash: ').strip().lower()
+    if controller_input not in ('', 'k', 'j'):
+        raise ValueError('Choose controller K or J')
+    gamepad = None
+    if controller_input == 'j':
+        from smash_joycon import JoyConGamepad
+        gamepad = JoyConGamepad(report=report)
     report('Prestart queue editor: a grab1, i 1 grab2, d 1, m 2 1, clear, l, RUN, Q.')
     while True:
         cmd = input('queue> ').strip()
@@ -508,9 +541,13 @@ def menu(routes, load_sequence, validate_target, *, connect, read_all,
         except (ValueError, IndexError) as error:
             report(f'Queue edit rejected: {error}')
     report('Starting live queue. Clear ALL future paths; support arm; physical stop ready.')
-    return playback(catalog, plan, profile, connect=connect, read_all=read_all,
-                    enable_all_torque=enable_all_torque,
-                    disable_all_torque=disable_all_torque,
-                    terminal_class=terminal_class, settings=settings,
-                    check_result=check_result, gripper_profile=gripper_profile,
-                    report=report)
+    try:
+        return playback(catalog, plan, profile, connect=connect, read_all=read_all,
+                        enable_all_torque=enable_all_torque,
+                        disable_all_torque=disable_all_torque,
+                        terminal_class=terminal_class, settings=settings,
+                        check_result=check_result, gripper_profile=gripper_profile,
+                        gamepad=gamepad, report=report)
+    finally:
+        if gamepad is not None:
+            gamepad.close()
