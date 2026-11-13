@@ -120,7 +120,7 @@ class HardwareChecks(unittest.TestCase):
         motor, statuses, logs = Motor(), [], []
         keys = deque()
         def key():
-            if motor.packets >= 2 and not keys and not statuses:
+            if motor.packets >= 2 and "injected" not in statuses:
                 statuses.append("injected")
                 keys.extend("2e")
             return keys.popleft() if keys else None
