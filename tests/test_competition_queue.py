@@ -156,5 +156,51 @@ class HardwareChecks(unittest.TestCase):
         self.assertIn("closed",statuses)
 
 
+
+class PreflightIsolationTests(unittest.TestCase):
+    def test_bad_square_is_disabled_without_renumbering_good_square(self):
+        paths = [Path("c1r1m.json"), Path("c1r2m.json")]
+        messages = []
+        def load(path):
+            if path.stem == "c1r1m":
+                return None, [pt(path.stem, 1, 200).target,
+                              dict(base=200, shoulder=9999, elbow=2000,
+                                   wrist=2000, gripper=3000)]
+            return None, [pt(path.stem, 1, 200).target]
+        def validate(target):
+            if target["shoulder"] > 3000:
+                raise ValueError("shoulder: raw=9999, computed_angle=200.0 deg, allowed=-90..90 deg")
+        catalog = cq.build_catalog(paths, load, validate,
+                                   skip_invalid=True, report=messages.append)
+        self.assertEqual(list(catalog), ["2"])
+        self.assertIn("c1r1m waypoint 2", messages[0])
+        self.assertIn("shoulder: raw=9999", messages[0])
+        plan = cq.QueuePlan(catalog)
+        with self.assertRaises(ValueError):
+            plan.append("1")
+        plan.append("2")
+        self.assertEqual(list(plan.pending), ["2"])
+
+    def test_failed_place_route_reports_correct_file_without_stale_number(self):
+        messages = []
+        def load(path):
+            if path.stem.endswith("p"):
+                raise ValueError("cannot load file")
+            return None, [pt(path.stem, 1, 200).target,
+                          pt(path.stem, 2, 300).target]
+        catalog = cq.build_catalog([Path("c3r3m.json")], load, lambda target: None,
+                                   skip_invalid=True, report=messages.append)
+        self.assertFalse(catalog)
+        self.assertIn("c3r3p: cannot load file", messages[0])
+        self.assertNotIn("waypoint 2", messages[0])
+
+    def test_strict_catalog_reports_location_and_rejects_invalid(self):
+        def reject(_target):
+            raise ValueError("bad joint")
+        with self.assertRaisesRegex(ValueError, "c2r2m waypoint 1"):
+            cq.build_catalog([Path("c2r2m.json")],
+                             lambda path: (None, [pt(path.stem, 1, 300).target]),
+                             reject)
+
 if __name__ == "__main__":
     unittest.main()
