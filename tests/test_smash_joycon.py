@@ -61,6 +61,56 @@ class SmashMappingTests(unittest.TestCase):
         mapper.button("ZR", True)
         self.assertEqual(mapper.button("MINUS", True), [("clear", None)])
 
+
+    def test_electric_wind_god_fist_uses_selected_target(self):
+        mapper = sj.SmashMapper()
+        mapper.stick(0.9, -0.9, now=0.5)
+        self.assertEqual(mapper.square, "c3r1")
+        mapper.button("ZR", True)
+        mapper.stick(0.9, 0.0, now=1.0)
+        mapper.stick(0.0, 0.9, now=1.1)
+        mapper.stick(0.9, 0.9, now=1.2)
+        event = mapper.button("A", True, now=1.3)
+        self.assertEqual(event[0], ("replace_pending", "c3r1a"))
+        self.assertIn("ELECTRIC", event[1][1])
+        self.assertEqual(mapper.square, "c3r1")
+
+    def test_failed_command_input_fails_closed(self):
+        mapper = sj.SmashMapper()
+        mapper.button("ZR", True)
+        mapper.stick(0.9, 0.0, now=1.0)
+        event = mapper.button("A", True, now=1.1)
+        self.assertEqual(event[0][0], "notice")
+        self.assertIn("Incomplete", event[0][1])
+        mapper.button("ZR", False)
+        mapper.button("ZR", True)
+        self.assertEqual(mapper.button("A", True)[0],
+                         ("add", "c2r2"))
+
+    def test_priority_buttons_replace_pending_not_active(self):
+        mapper = sj.SmashMapper()
+        mapper.stick(-0.9, -0.9)
+        mapper.button("ZR", True)
+        self.assertEqual(mapper.button("L", True)[0],
+                         ("replace_pending", "c1r1"))
+        self.assertEqual(mapper.button("R", True)[0],
+                         ("replace_pending", "c1r1a"))
+        plan = cq.QueuePlan({"1": (), "2": (), "3": ()}, ["1", "2"],
+                            aliases={"c1r1a": "3"})
+        manager = cq.InputManager(plan, lambda *_: None,
+               gamepad=FakeGamepad([("replace_pending", "c1r1a")]))
+        manager.active = "1"
+        self.assertTrue(manager.poll(FakeTerminal()))
+        self.assertEqual(list(plan.pending), ["3"])
+        self.assertEqual(manager.active, "1")
+
+    def test_invalid_priority_does_not_erase_queue(self):
+        plan = cq.QueuePlan({"1": (), "2": ()}, ["1", "2"])
+        manager = cq.InputManager(plan, lambda *_: None,
+               gamepad=FakeGamepad([("replace_pending", "not_recorded")]))
+        self.assertTrue(manager.poll(FakeTerminal()))
+        self.assertEqual(list(plan.pending), ["1", "2"])
+
     def test_input_manager_accepts_actions_and_does_not_touch_active(self):
         plan = cq.QueuePlan({"1": (), "2": ()}, ["1"],
                             aliases={"c2r2": "2"}, labels={"1": "existing", "2": "c2r2"})
