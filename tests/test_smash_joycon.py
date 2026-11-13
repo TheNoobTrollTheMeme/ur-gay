@@ -91,46 +91,73 @@ class SmashMappingTests(unittest.TestCase):
         mapper = sj.SmashMapper()
         mapper.dpad("UP")
         mapper.right_stick(.9)
-        self.assertIn("middle", mapper.button("X", True)[0][1])
+        mapper.stick(-.9, .9, now=0.0)  # SW uniquely selects middle row
+        self.assertIn("middle", mapper.button("X", True, now=.1)[0][1])
         mapper.button("ZR", True)
         self.assertEqual(mapper.button("X", True)[0],
                          ("add_combo", ("grab4", "c1r2")))
         self.assertEqual(mapper.button("X", True)[0],
                          ("add_combo", ("grab4", "c2r2")))
 
-
-    def test_stick_x_selects_top_middle_and_bottom_rows(self):
-        for y, expected in ((-0.9, "top"), (0.0, "middle"), (0.9, "bottom")):
-            with self.subTest(y=y):
+    def test_roulette_x_has_one_line_for_each_direction(self):
+        # 8 distinct directions, 8 distinct winning lines.
+        cases = (
+            ((0, -.9), 0, "top"),
+            ((.9, -.9), 7, "other diagonal"),
+            ((.9, 0), 5, "right"),
+            ((.9, .9), 4, "center column"),
+            ((0, .9), 2, "bottom"),
+            ((-.9, .9), 1, "middle"),
+            ((-.9, 0), 3, "left"),
+            ((-.9, -.9), 6, "main diagonal"),
+        )
+        chosen = set()
+        for (x, y), index, label in cases:
+            with self.subTest(direction=(x,y)):
                 mapper = sj.SmashMapper()
-                mapper.stick(0, y, now=0.0)
-                events = mapper.button("X", True, now=0.1)
-                self.assertIn(expected, events[0][1])
-                self.assertEqual(events[0][0], "notice")
+                mapper.stick(x, y, now=.1)
+                result = mapper.button("X", True, now=.2)
+                self.assertEqual(result[0][0], "notice")
+                self.assertIn(label, result[0][1])
+                self.assertEqual(mapper.line_index, index)
+                chosen.add(mapper.line_index)
+        self.assertEqual(chosen, set(range(8)))
 
-    def test_stick_y_selects_left_center_and_right_columns(self):
-        # Y roulette offsets X's row choice by +3. This is NOT horizontal
-        # mirroring, which belongs only to Zanmato endpoint flicks.
-        for y, expected in ((-0.9, "left"), (0.0, "center column"),
-                            (0.9, "right")):
-            with self.subTest(y=y):
+    def test_y_roulette_is_one_to_one_with_plus_three_offset(self):
+        x_map = (
+            ((0, -.9), 0),
+            ((.9, -.9), 7),
+            ((.9, 0), 5),
+            ((.9, .9), 4),
+            ((0, .9), 2),
+            ((-.9, .9), 1),
+            ((-.9, 0), 3),
+            ((-.9, -.9), 6),
+        )
+        chosen = set()
+        for (x, y), index in x_map:
+            with self.subTest(direction=(x,y)):
                 mapper = sj.SmashMapper()
-                mapper.stick(0, y, now=0.0)
-                events = mapper.button("Y", True, now=0.1)
-                self.assertIn(expected, events[0][1])
-                self.assertIn("OFFSET", events[0][1])
+                mapper.stick(x, y, now=.1)
+                result = mapper.button("Y", True, now=.2)
+                self.assertEqual(result[0][0], "notice")
+                self.assertIn("OFFSET", result[0][1])
+                self.assertEqual(mapper.line_index, (index+3)%8)
+                chosen.add(mapper.line_index)
+        self.assertEqual(chosen, set(range(8)))
 
     def test_diagonal_x_and_y_are_offset(self):
+        # No Y mirroring for the one-direction roulette.
         for x, y, x_line, y_line in (
-                (-0.9, -0.9, "main diagonal", "middle"),
-                (0.9, -0.9, "other diagonal", "bottom")):
-            with self.subTest(x=x, y=y):
+                (-.9, -.9, "main diagonal", "middle"),
+                (.9, -.9, "other diagonal", "bottom")):
+            with self.subTest(direction=(x,y)):
                 m_x = sj.SmashMapper()
-                m_x.stick(x, y, now=0.0)
-                self.assertIn(x_line, m_x.button("X", True, now=0.1)[0][1])
+                m_x.stick(x, y, now=.1)
+                self.assertIn(x_line, m_x.button("X", True, now=.2)[0][1])
                 m_y = sj.SmashMapper()
-                m_y.stick(x, y, now=0.0)
-                result = m_y.button("Y", True, now=0.1)[0][1]
+                m_y.stick(x, y, now=.1)
+                result = m_y.button("Y", True, now=.2)[0][1]
                 self.assertIn(y_line, result)
                 self.assertNotIn("ZANMATO", result)
 
@@ -152,10 +179,10 @@ class SmashMappingTests(unittest.TestCase):
     def test_draw_rejects_non_collinear_endpoints(self):
         mapper = sj.SmashMapper()
         mapper.stick(-.9, -.9, now=.1)  # c1r1
-        mapper.stick(.9, 0., now=.2)    # c3r2 (not a line endpoint)
+        mapper.stick(.9, 0., now=.2)    # c3r2 not a line endpoint
         result = mapper.button("Y", True, now=.3)
         self.assertIn("Y OFFSET ROULETTE", result[0][1])
-        self.assertEqual(mapper.line[0], "center column")
+        self.assertEqual(mapper.line[0], "top")  # right -> X5 +3 -> top0
 
     def test_old_gesture_expires_to_roulette(self):
         mapper = sj.SmashMapper()
@@ -197,7 +224,8 @@ class SmashMappingTests(unittest.TestCase):
 
     def test_edge_first_and_L_produce_four_orders(self):
         mapper = sj.SmashMapper()
-        mapper.button("X", True) # neutral, middle row
+        mapper.stick(-.9, .9, now=.1)  # SW => middle row
+        mapper.button("X", True, now=.2)
         self.assertEqual(mapper.line[1], ("c1r2", "c2r2", "c3r2"))
         mapper.dpad("DOWN")
         self.assertEqual(mapper.line[1], ("c1r2", "c3r2", "c2r2"))
@@ -224,7 +252,7 @@ class SmashMappingTests(unittest.TestCase):
         self.assertIn("top", result[0][1])
         self.assertEqual(mapper.line[1], ("c3r1", "c2r1", "c1r1"))
         mapper.button("L", False)
-        mapper.stick(0, 0.0, now=1.)
+        mapper.stick(-.9, .9, now=1.)  # SW => middle row
         mapper.button("X", True, now=1.1)
         self.assertEqual(mapper.line[1], ("c1r2", "c2r2", "c3r2"))
 
@@ -238,6 +266,16 @@ class SmashMappingTests(unittest.TestCase):
         mapper.button("L", True)
         self.assertEqual(mapper.button("B", True), [("undo", None)])
         self.assertEqual(mapper.button("PLUS", True), [("stop", None)])
+
+    def test_neutral_x_y_are_noops_without_motion(self):
+        for button in ("X", "Y"):
+            with self.subTest(button=button):
+                mapper = sj.SmashMapper()
+                mapper.line_index = 4
+                result = mapper.button(button, True, now=.1)
+                self.assertIn("flick", result[0][1].lower())
+                self.assertEqual(result[0][0], "notice")
+                self.assertEqual(mapper.line_index, 4)
 
     def test_electric_input_prioritizes_full_combo_not_attack(self):
         mapper = sj.SmashMapper()
