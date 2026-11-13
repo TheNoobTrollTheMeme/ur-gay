@@ -123,15 +123,25 @@ class SmashMapper:
         self._gesture_end = None
         return self._line_notice(method)
 
+    # Exactly one line per stick direction, never inferred from neutral.
+    # Coordinates are (horizontal, vertical), with up being negative y.
+    # The Y roulette rotates the *line index* by three, not the board geometry.
+    ROULETTE_X = {
+        (0, -1): 0,    # Up: top row
+        (1, -1): 7,    # Up-right: anti-diagonal
+        (1, 0): 5,     # Right: right column
+        (1, 1): 4,     # Down-right: center column
+        (0, 1): 2,     # Down: bottom row
+        (-1, 1): 1,    # Down-left: middle row
+        (-1, 0): 3,    # Left: left column
+        (-1, -1): 6,   # Up-left: main diagonal
+    }
+
     def _line_from_aim(self, button):
-        """X = row/diagonal roulette; Y = offset +3, deliberately NOT mirror."""
-        dx, dy = self._line_aim
-        if dx and dy:
-            original = 6 if dx == dy else 7
-        else:
-            original = {-1: 0, 0: 1, 1: 2}[dy]
-        # +3 maps X's three rows to Y's three columns, but diagonal inputs
-        # map to non-mirrored rows. No deceptive claims of on-screen output.
+        """Eight distinct stick directions => eight distinct lines per button."""
+        original = self.ROULETTE_X.get(self._line_aim)
+        if original is None:
+            return None
         return (original + 3) % 8 if button == "Y" else original
 
     @staticmethod
@@ -161,7 +171,11 @@ class SmashMapper:
                 index, reverse = result
                 return self._select_line(index, reverse=reverse,
                     method=("ZANTETSUKEN" if button == "X" else "ZANMATO"))
-        return self._select_line(self._line_from_aim(button),
+        selected = self._line_from_aim(button)
+        if selected is None:
+            return [("notice", "ROULETTE: flick in one of 8 directions first; "
+                    "current line unchanged")]
+        return self._select_line(selected,
                     method=("X ROULETTE" if button == "X" else
                             "Y OFFSET ROULETTE (+3)"))
 
