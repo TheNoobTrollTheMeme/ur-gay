@@ -113,6 +113,22 @@ class HardwareChecks(unittest.TestCase):
         self.assertEqual([c[2:] for c in motor.commands], [(1200,60)]*4+[(300,20)])
         self.assertEqual(motor.packets, 1)
 
+    def test_explicit_fast_gripper_profile_is_independent(self):
+        motor = Motor()
+        cq.sync_targets(motor, SETTINGS, lambda *_: None,
+                        pt("m", 1).target, "fast", gripper_profile="turbo")
+        self.assertEqual([c[2:] for c in motor.commands],
+                         [(600, 35)] * 4 + [(1200, 60)])
+        self.assertEqual(motor.packets, 1)
+
+    def test_invalid_gripper_profile_does_not_send_motor_commands(self):
+        motor = Motor()
+        with self.assertRaisesRegex(ValueError, "gripper speed profile"):
+            cq.sync_targets(motor, SETTINGS, lambda *_: None,
+                            pt("m", 1).target, "turbo", gripper_profile="unlimited")
+        self.assertEqual(motor.commands, [])
+        self.assertEqual(motor.packets, 0)
+
     def test_live_preinput_runs_next_square(self):
         catalog = {"1": (pt("m1",1,2100), pt("m1",2,2200)),
                    "2": (pt("m2",1,2300), pt("m2",2,2400))}
