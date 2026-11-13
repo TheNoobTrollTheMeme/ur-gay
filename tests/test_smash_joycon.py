@@ -222,27 +222,27 @@ class SmashMappingTests(unittest.TestCase):
         self.assertIn("ZANMATO", b.button("Y", True, now=.3)[0][1])
         self.assertEqual(b.line[1], ("c3r1", "c3r2", "c3r3"))
 
-    def test_edge_first_and_L_produce_four_orders(self):
+    def test_middle_first_and_L_produce_four_orders(self):
         mapper = sj.SmashMapper()
         mapper.stick(-.9, .9, now=.1)  # SW => middle row
         mapper.button("X", True, now=.2)
         self.assertEqual(mapper.line[1], ("c1r2", "c2r2", "c3r2"))
         mapper.dpad("DOWN")
-        self.assertEqual(mapper.line[1], ("c1r2", "c3r2", "c2r2"))
+        self.assertEqual(mapper.line[1], ("c2r2", "c1r2", "c3r2"))
         mapper.button("L", True)
-        self.assertEqual(mapper.line[1], ("c3r2", "c1r2", "c2r2"))
+        self.assertEqual(mapper.line[1], ("c2r2", "c3r2", "c1r2"))
         mapper.dpad("DOWN")
         self.assertEqual(mapper.line[1], ("c3r2", "c2r2", "c1r2"))
         mapper.button("L", False)
 
-    def test_edge_first_works_on_diagonal_corners(self):
+    def test_middle_first_works_on_diagonal_corners(self):
         mapper = sj.SmashMapper()
         mapper.stick(-.9, -.9, now=.1)
         mapper.button("X", True, now=.2)
         mapper.dpad("DOWN")
-        self.assertEqual(mapper.line[1], ("c1r1", "c3r3", "c2r2"))
+        self.assertEqual(mapper.line[1], ("c2r2", "c1r1", "c3r3"))
         mapper.button("L", True)
-        self.assertEqual(mapper.line[1], ("c3r3", "c1r1", "c2r2"))
+        self.assertEqual(mapper.line[1], ("c2r2", "c3r3", "c1r1"))
 
     def test_L_modifier_reverses_new_line_selection(self):
         mapper = sj.SmashMapper()
