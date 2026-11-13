@@ -251,7 +251,8 @@ def wait_step(handler, terminal, manager, previous, current, following,
     """No user pause, but never skip a change of direction or gripper action."""
     blend = (previous is not None and following is not None and
              eligible_blend(previous, current, following, settings.JOINT_NAMES))
-    deadline = clock() + TIMEOUT_SECONDS
+    started = clock()
+    deadline = started + TIMEOUT_SECONDS
     while True:
         if not manager.poll(terminal):
             return False
@@ -273,7 +274,10 @@ def wait_step(handler, terminal, manager, previous, current, following,
         if not moving:
             if near:
                 return manager.poll(terminal)
-            raise RuntimeError('Motor stopped outside waypoint tolerance; aborting.')
+            # The first status poll can precede the servo's moving flag.
+            # Allow brief startup latency, not an indefinite missed waypoint.
+            if clock() - started >= 0.25:
+                raise RuntimeError('Motor stopped outside waypoint tolerance; aborting.')
         if clock() >= deadline:
             raise TimeoutError('Competition motion exceeded 15 seconds.')
         sleep(0.01)
