@@ -226,6 +226,30 @@ def validate_target(positions):
                 'arm_settings.py calibration; safety limits unchanged)')
 
 
+def validate_competition_target(positions):
+    """Trust manually verified shoulder ticks in Competition Mode only.
+
+    Bypass the app-specific shoulder angle conversion, NOT servo register range.
+    Preserve all other configured angle limits and normal-playback validation.
+    This does not validate physical clearance or remove motor firmware limits.
+    """
+    missing = set(settings.JOINT_NAMES) - set(positions)
+    extra = set(positions) - set(settings.JOINT_NAMES)
+    if missing or extra:
+        raise ValueError(f'Waypoint joint mismatch: missing={sorted(missing)}, extra={sorted(extra)}')
+    for joint in settings.JOINT_NAMES:
+        value = positions[joint]
+        if type(value) is not int or not 0 <= value <= 4095:
+            raise ValueError(f'{joint}: invalid raw servo tick {value!r}; must be 0..4095')
+        if joint != 'shoulder':
+            angle = position_to_angle(joint, value)
+            lo, hi = settings.ANGLE_LIMITS[joint]
+            if not lo <= angle <= hi:
+                raise ValueError(
+                    f'{joint}: raw={value}, computed_angle={angle:.2f} deg, '
+                    f'allowed={lo}..{hi} deg; competition did not bypass this joint')
+
+
 def live_attack_targets(path):
     """Refresh the separate attack file before each of its three steps."""
     for index in range(3):
@@ -408,7 +432,7 @@ def competition_placements():
     """Universal queue: any validated saved motion, plus combined square macros."""
     refresh_attacks()
     return competition.menu(
-        wp.find_sequences(), wp.load_sequence, validate_target,
+        wp.find_sequences(), wp.load_sequence, validate_competition_target,
         connect=connect, read_all=read_all,
         enable_all_torque=enable_all_torque,
         disable_all_torque=disable_all_torque, terminal_class=RawTerminal,
