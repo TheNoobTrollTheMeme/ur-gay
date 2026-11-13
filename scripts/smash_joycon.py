@@ -13,6 +13,7 @@ import argparse
 import os
 import select
 import sys
+import time
 
 LINES = (
     ("top", ("c1r1", "c2r1", "c3r1")),
@@ -33,6 +34,9 @@ class SmashMapper:
         self.cursor = (2, 2)
         self.line_index = 0
         self.line_step = 0
+        self._command_state = 0
+        self._command_since = 0.0
+        self._electric_until = 0.0
 
     @property
     def square(self):
@@ -42,22 +46,56 @@ class SmashMapper:
     def line(self):
         return LINES[self.line_index]
 
-    def stick(self, x, y):
-        """Normalized X/Y in [-1, 1]; neutral retains the last square."""
+    def _command_reset(self):
+        self._command_state = 0
+        self._command_since = 0.0
+        self._electric_until = 0.0
+
+    def stick(self, x, y, *, now=None):
+        """Aim while unarmed; hold ZR to lock target and input Kazuya commands.
+
+        EWGF-style gesture: right, down, down-right, then A within 0.45s.
+        This is an OPTIONAL quick counter, not a servo-speed modifier.
+        """
         x, y = max(-1., min(1., x)), max(-1., min(1., y))
+        if self.armed:
+            now = time.monotonic() if now is None else now
+            if x > 0.55 and abs(y) < 0.35:
+                direction = "F"
+            elif y > 0.55 and abs(x) < 0.35:
+                direction = "D"
+            elif x > 0.5 and y > 0.5:
+                direction = "DF"
+            else:
+                direction = "N"
+            if self._command_state and now - self._command_since > 1.25:
+                self._command_reset()
+            if direction == "F" and self._command_state == 0:
+                self._command_state = 1
+                self._command_since = now
+            elif direction == "D" and self._command_state == 1:
+                self._command_state = 2
+            elif direction == "DF" and self._command_state == 2:
+                self._command_state = 3
+                self._electric_until = now + 0.45
+            return []
         threshold = .43
         if abs(x) > threshold or abs(y) > threshold:
-            self.cursor = (
+            new_cursor = (
                 2 + (1 if x > threshold else (-1 if x < -threshold else 0)),
                 2 + (1 if y > threshold else (-1 if y < -threshold else 0)),
             )
-            return [("notice", f"Selected {self.square}")]
+            if new_cursor != self.cursor:
+                self.cursor = new_cursor
+                return [("notice", f"Selected {self.square}")]
         return []
 
-    def button(self, name, pressed):
+    def button(self, name, pressed, *, now=None):
         if name == "ZR":
             self.armed = pressed
-            return [("notice", "ARMED: ZR held" if pressed else "Disarmed")]
+            self._command_reset()
+            return [("notice", "ARMED: ZR held (target locked)"
+                     if pressed else "Disarmed")]
         if not pressed:
             return []
         if name in ("PLUS", "HOME"):
@@ -70,10 +108,27 @@ class SmashMapper:
         if not self.armed:
             return []
         if name == "A":
+            now = time.monotonic() if now is None else now
+            if self._command_state == 3 and now <= self._electric_until:
+                self._command_reset()
+                return [("replace_pending", self.square + "a"),
+                        ("notice", f"ELECTRIC: counterattack {self.square} queued first")]
+            if self._command_state != 0:
+                self._command_reset()
+                return [("notice", "Incomplete electric input: no motion queued")]
             return [("add", self.square)]
         if name == "B":
             # Attacks require a token and the referee's approval outside this program.
+            self._command_reset()
             return [("add", self.square + "a")]
+        if name == "L":
+            self._command_reset()
+            return [("replace_pending", self.square),
+                    ("notice", f"PRIORITY PLACE: {self.square}, pending combo replaced")]
+        if name == "R":
+            self._command_reset()
+            return [("replace_pending", self.square + "a"),
+                    ("notice", f"PRIORITY ATTACK: {self.square}, pending combo replaced")]
         if name == "Y":
             return [("add", "tapinr")]
         if name == "X":
@@ -136,6 +191,8 @@ class JoyConGamepad:
             ecodes.BTN_NORTH: "X",
             ecodes.BTN_WEST: "Y",
             ecodes.BTN_TR2: "ZR",
+            ecodes.BTN_TL: "L",
+            ecodes.BTN_TR: "R",
             ecodes.BTN_START: "PLUS",
             ecodes.BTN_SELECT: "MINUS",
             ecodes.BTN_MODE: "HOME",
@@ -144,7 +201,8 @@ class JoyConGamepad:
         self.axes = {"x": 0., "y": 0.}
         self.report("SMASH mode: stick selects 3x3 cell; hold ZR+A place; "
                     "ZR+B attack; X cycle line; ZR+X next line cell; "
-                    "ZR+Y tapinr; ZR+MINUS clear pending; PLUS/HOME STOP.")
+                    "ZR+Y tapinr; ZR+L priority place; ZR+R priority attack; "
+                    "ZR+F,D,DF+A Electric; ZR+MINUS clear pending; PLUS/HOME STOP.")
         self.report("Only use attack after a confirmed token and referee approval. "
                     "Controller disconnect stops playback; physical E-stop is still required.")
         for dev in self.devices:
