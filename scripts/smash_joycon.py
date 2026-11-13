@@ -28,11 +28,11 @@ LINES = (
 )
 
 DEFAULT_PICKUPS = tuple(f"grab{i}" for i in range(1, 7))
-SUPPLY_COLS = ("Plate B left", "Plate A center", "Plate B right")
+SUPPLY_PLATES = ("Plate B left", "Plate A front", "Plate B right")
 
 
 class SmashMapper:
-    """Aim with left stick, select source block with right stick or D-pad."""
+    """Left stick aims; D-pad picks one of 3 plates; right stick picks L/R block."""
 
     def __init__(self, pickup_names=DEFAULT_PICKUPS):
         if len(pickup_names) != 6 or any(not str(n).strip() for n in pickup_names):
@@ -56,33 +56,30 @@ class SmashMapper:
         return (self.pickup, self.square)
 
     def _source_notice(self):
-        col = self.source_index % 3
-        row = self.source_index // 3
+        plate = self.source_index // 2
+        side = "left block" if self.source_index % 2 == 0 else "right block"
         return ("notice", f"Block {self.source_index+1}/6: "
-                f"{SUPPLY_COLS[col]}, tier {row+1}, pickup {self.pickup}")
+                f"{SUPPLY_PLATES[plate]}, {side}, pickup {self.pickup}")
 
     def dpad(self, direction, pressed=True):
-        """LEFT/RIGHT cycle all six slots, UP/DOWN choose source tier."""
+        """D-pad LEFT/UP/RIGHT selects Plate B-left / Plate A / Plate B-right."""
         if not pressed:
             return []
-        old = self.source_index
-        if direction == "LEFT":
-            self.source_index = (old - 1) % 6
-        elif direction == "RIGHT":
-            self.source_index = (old + 1) % 6
-        elif direction == "UP":
-            self.source_index = old % 3
-        elif direction == "DOWN":
-            self.source_index = (old % 3) + 3
-        return [self._source_notice()] if self.source_index != old else []
-
-    def right_stick(self, x, y):
-        """Right stick selects one of three supply plates and one of two tiers."""
-        if abs(x) < 0.43 and abs(y) < 0.43:
+        plate = {"LEFT": 0, "UP": 1, "RIGHT": 2}.get(direction)
+        if plate is None:
             return []
-        column = 0 if x < -0.43 else 2 if x > 0.43 else 1
-        row = 0 if y < 0.43 else 1
-        chosen = row * 3 + column
+        chosen = plate * 2 + (self.source_index % 2)
+        if chosen == self.source_index:
+            return []
+        self.source_index = chosen
+        return [self._source_notice()]
+
+    def right_stick(self, x, y=0.0):
+        """Right stick LEFT/RIGHT selects the left or right block on current plate."""
+        if abs(x) < 0.43:
+            return []
+        side = 0 if x < 0 else 1
+        chosen = (self.source_index // 2) * 2 + side
         if chosen == self.source_index:
             return []
         self.source_index = chosen
@@ -248,9 +245,11 @@ class JoyConGamepad:
                     {ecodes.ABS_RX, ecodes.ABS_RY} <= axis_set):
                 self.right_source = device.fd
                 self.right_codes = (ecodes.ABS_RX, ecodes.ABS_RY)
-            if ((self.stick_source is None or "left" in name or "(l)" in name)
-                    and {ecodes.ABS_X, ecodes.ABS_Y} <= axis_set
-                    and self.right_source != device.fd):
+            is_right_joycon = ("joy-con (r)" in name or
+                               "joy-con right" in name)
+            if ({ecodes.ABS_X, ecodes.ABS_Y} <= axis_set and
+                    not is_right_joycon and
+                    (self.stick_source is None or "left" in name or "(l)" in name)):
                 self.stick_source = device.fd
         if not self.devices:
             raise RuntimeError("No paired Joy-Con / Pro Controller input device found.")
@@ -272,15 +271,17 @@ class JoyConGamepad:
         }
         # Neutral normalized stick; directions persist until a new non-neutral reading.
         self.axes = {"x": 0., "y": 0.}
-        self.report("SMASH: LEFT stick aim; RIGHT stick / D-pad pick block 1..6; "
-                    "A=pickup+place combo; B=undo last pending; ZR+B=clear all; "
-                    "X=cycle lines; ZR+X=next line square; ZR+L=priority place; "
-                    "ZR+R=priority attack; ZR+F,D,DF+A=Electric PLACE; "
+        self.report("SMASH: LEFT stick aim; D-pad LEFT/UP/RIGHT selects "
+                    "Plate B-left / Plate A-front / Plate B-right; RIGHT stick "
+                    "LEFT/RIGHT selects one of two blocks on that plate. "
+                    "A=pickup+place; B=undo; ZR+B=clear pending; "
+                    "X=cycle line; ZR+X=next line; ZR+L=priority place; "
+                    "ZR+R=priority attack; ZR+F,D,DF+A=Electric place; "
                     "PLUS/HOME=STOP. NO PUTTING.")
         self.report("A pickup+place is queued ONLY if both saved motion names exist. "
                     "A gamepad disconnect stops playback; physical E-stop remains required.")
-        self.report("Block layout: slots 1-3 first tier, 4-6 second; "
-                    "columns Plate B left, Plate A center, Plate B right.")
+        self.report("Block setup: slots 1-2 Plate B-left, 3-4 Plate A-front, "
+                    "5-6 Plate B-right. Arrange them accordingly before Start.")
         for i, name in enumerate(self.mapper.pickup_names, 1):
             self.report(f"Supply slot {i}: {name}")
         for dev in self.devices:
@@ -313,8 +314,7 @@ class JoyConGamepad:
                             and event.code in self.right_codes and info):
                         which = "x" if event.code == self.right_codes[0] else "y"
                         self.right_axes[which] = self._normalize(event.value, info)
-                        events.extend(self.mapper.right_stick(
-                            self.right_axes["x"], self.right_axes["y"]))
+                        events.extend(self.mapper.right_stick(self.right_axes["x"]))
                     elif (device.fd == self.stick_source and info
                           and event.code in (self.ecodes.ABS_X, self.ecodes.ABS_Y)):
                         which = "x" if event.code == self.ecodes.ABS_X else "y"
