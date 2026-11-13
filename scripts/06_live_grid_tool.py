@@ -405,9 +405,10 @@ def run_saved_sequence(name, *, auto=False, dry_run=False):
             port.closePort()
 
 def competition_placements():
-    """Live editable competition queue with per-joint speed profiles."""
+    """Universal queue: any validated saved motion, plus combined square macros."""
+    refresh_attacks()
     return competition.menu(
-        cell_routes(), wp.load_sequence, validate_target,
+        wp.find_sequences(), wp.load_sequence, validate_target,
         connect=connect, read_all=read_all,
         enable_all_torque=enable_all_torque,
         disable_all_torque=disable_all_torque, terminal_class=RawTerminal,
