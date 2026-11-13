@@ -1,9 +1,8 @@
-"""Editable pre-input queue for STS3215 competition placement routes.
+"""Editable pre-input queue for all validated STS3215 waypoint recordings.
 
-Only validated move/place waypoint pairs are eligible. Queued commands are
-snapshots loaded before the motors are enabled. During playback, keys edit
-*pending* squares while the active square finishes. No unverified firmware
-'overclock' or automatic gripper force adjustment is attempted.
+Accepts individual move/place/grab/custom/derived-attack recordings, plus
+optional square macros. No arbitrary Python execution, force-limit bypass
+or firmware overclock. Only pending actions are editable during playback.
 """
 from collections import deque
 from dataclasses import dataclass
@@ -30,18 +29,24 @@ class Point:
 
 
 class QueuePlan:
-    """Manipulates only waiting actions, never the currently executing action."""
-    def __init__(self, catalog, initial=()):
+    """Change waiting motions without altering the one currently executing."""
+    def __init__(self, catalog, initial=(), *, aliases=None, labels=None):
         self.catalog = dict(catalog)
+        self.aliases = dict(aliases or {})
+        self.labels = dict(labels or {})
         self.pending = deque()
         for action in initial:
             self.append(action)
 
     def _check(self, action):
-        action = str(action)
-        if action not in self.catalog:
-            raise ValueError(f'Unknown square {action}. Valid: {" ".join(self.catalog)}')
-        return action
+        action = str(action).strip().lower()
+        resolved = action if action in self.catalog else self.aliases.get(action)
+        if resolved not in self.catalog:
+            raise ValueError(f'Unavailable motion {action!r}. Use a READY name or ID.')
+        return resolved
+
+    def name(self, identifier):
+        return self.labels.get(identifier, identifier)
 
     def append(self, action):
         self.pending.append(self._check(action))
@@ -75,11 +80,14 @@ class QueuePlan:
         return self.pending.popleft()
 
     def show(self, active=None):
-        items = ' '.join(f'{index}:{name}' for index, name in enumerate(self.pending, 1)) or '(empty)'
-        return f'Active: {active or "idle"} | Pending: {items}'
+        items = (' '.join(f'{index}:{self.name(identifier)}'
+                          for index, identifier in enumerate(self.pending, 1))
+                 or '(empty)')
+        active_name = self.name(active) if active else 'idle'
+        return f'Active: {active_name} | Pending: {items}'
 
     def edit(self, command):
-        """Parse queue editor commands. Caller catches ValueError and keeps motion going."""
+        """Commands work by saved motion name or stable menu number."""
         words = command.strip().lower().split()
         if not words:
             return self.show()
@@ -87,16 +95,21 @@ class QueuePlan:
         if op in ('l', 'ls', 'list') and not args:
             return self.show()
         if op in ('a', 'add') and len(args) == 1:
-            self.append(args[0]); return self.show()
+            self.append(args[0])
+            return self.show()
         if op in ('i', 'insert') and len(args) == 2:
-            self.insert(args[0], args[1]); return self.show()
+            self.insert(args[0], args[1])
+            return self.show()
         if op in ('d', 'del', 'delete') and len(args) == 1:
-            removed = self.delete(args[0]); return f'Removed pending square {removed}. {self.show()}'
+            removed = self.delete(args[0])
+            return f'Removed pending motion {self.name(removed)}. {self.show()}'
         if op in ('m', 'move') and len(args) == 2:
-            self.move(args[0], args[1]); return self.show()
+            self.move(args[0], args[1])
+            return self.show()
         if op == 'clear' and not args:
-            self.clear(); return self.show()
-        raise ValueError('Commands: a 2, i 1 2, d 1, m 2 1, clear, l')
+            self.clear()
+            return self.show()
+        raise ValueError('Commands: a grab1, i 1 grab2, d 1, m 2 1, clear, l')
 
 
 def build_catalog(routes, load_sequence, validate_target, *,
@@ -134,6 +147,72 @@ def build_catalog(routes, load_sequence, validate_target, *,
             continue
         catalog[str(index)] = tuple(steps)
     return catalog
+
+
+# Reject explicit simulation-only files even if their joint-angle numbers fit.
+_UNCLEARED = ('SIMULATION ONLY', 'NOT CLEARED FOR', 'UNVERIFIED',
+              'ESTIMATED GEOMETRY')
+
+
+def build_motion_catalog(routes, load_sequence, validate_target, *, report=print):
+    """Discover all saved waypoint files, with stable IDs and named aliases.
+
+    A recording with bad points is unavailable, not fatal for all other motions.
+    Names and IDs remain stable despite invalid recordings. Move/place macros
+    are extra entries (e.g. c1r1) rather than replacements for m/p/a variants.
+    """
+    catalog, labels, aliases = {}, {}, {}
+    stem_ids = {}
+    duplicated = set()
+    for index, (path, data) in enumerate(routes, 1):
+        identifier = str(index)
+        name = path.stem.lower()
+        point_number = None
+        try:
+            if path.suffix.lower() != '.json':
+                raise ValueError('Not a saved JSON waypoint sequence')
+            description = str(data.get('description', '')).upper()
+            if any(flag in description for flag in _UNCLEARED):
+                raise ValueError('Explicitly marked simulation-only or unverified')
+            _, points = load_sequence(path)
+            if not points:
+                raise ValueError('Sequence has no waypoints')
+            steps = []
+            for point_number, point in enumerate(points, 1):
+                validate_target(point)
+                steps.append(Point(path.stem, point_number, dict(point)))
+        except (ValueError, RuntimeError, OSError, KeyError, IndexError, TypeError) as error:
+            loc = f' waypoint {point_number}' if point_number is not None else ''
+            report(f'DISABLED motion {identifier} ({path.stem}{loc}): {error}')
+            continue
+        catalog[identifier] = tuple(steps)
+        labels[identifier] = path.stem
+        if name in aliases:
+            duplicated.add(name)
+        else:
+            aliases[name] = identifier
+        stem_ids[name] = identifier
+    for name in duplicated:
+        aliases.pop(name, None)
+        report(f'Ambiguous motion name {name!r}. Queue by numeric ID.')
+
+    next_id = len(routes) + 1
+    for name, move_id in tuple(stem_ids.items()):
+        if not re.fullmatch(r'c[1-9]\d*r[1-9]\d*m', name):
+            continue
+        base = name[:-1]
+        place_id = stem_ids.get(base + 'p')
+        if place_id is None or move_id not in catalog or place_id not in catalog:
+            continue
+        if base in aliases:
+            report(f'Macro {base!r} skipped: conflicting recorded name.')
+            continue
+        identifier = str(next_id)
+        next_id += 1
+        catalog[identifier] = catalog[move_id] + catalog[place_id]
+        labels[identifier] = base
+        aliases[base] = identifier
+    return catalog, labels, aliases
 
 
 def eligible_blend(previous, current, following, names):
