@@ -149,8 +149,10 @@ class SmashMapper:
                 return index, True
         return None
 
-    def _choose_line(self, button):
-        if self._gesture_start and self._gesture_end:
+    def _choose_line(self, button, *, now=None):
+        now = time.monotonic() if now is None else now
+        if (self._gesture_start and self._gesture_end
+                and now - self._gesture_since <= 1.5):
             start, end = self._gesture_start, self._gesture_end
             if button == "Y":
                 start, end = self._hmirror(start), self._hmirror(end)
@@ -248,7 +250,7 @@ class SmashMapper:
         if name in ("X", "Y") and not self.armed:
             # Two endpoint flicks = Zantetsuken / horizontally mirrored Zanmato.
             # One directional input = X/Y roulette. Selection never moves robot.
-            return self._choose_line(name)
+            return self._choose_line(name, now=now)
         if name == "A":
             now = time.monotonic() if now is None else now
             combo = self.selection
@@ -393,8 +395,24 @@ class JoyConGamepad:
             raise RuntimeError("Joy-Con disconnected; stop requested.")
         ready, _, _ = select.select(self.devices, [], [], 0)
         for device in ready:
+            left_changed = right_changed = False
+            def flush_axes():
+                nonlocal left_changed, right_changed
+                if left_changed:
+                    events.extend(self.mapper.stick(self.axes["x"],
+                                                    self.axes["y"]))
+                    left_changed = False
+                if right_changed:
+                    events.extend(self.mapper.right_stick(self.right_axes["x"]))
+                    right_changed = False
             for event in device.read():
-                if event.type == self.ecodes.EV_KEY:
+                if event.type == self.ecodes.EV_SYN:
+                    # One coherent stick position per EV_SYN frame. This avoids
+                    # false cardinal intermediate points on a diagonal flick.
+                    if event.code == self.ecodes.SYN_REPORT:
+                        flush_axes()
+                elif event.type == self.ecodes.EV_KEY:
+                    flush_axes()
                     label = self.button_codes.get(event.code)
                     if label and event.value in (0, 1):
                         events.extend(self.mapper.button(label, event.value == 1))
@@ -405,12 +423,12 @@ class JoyConGamepad:
                             and event.code in self.right_codes and info):
                         which = "x" if event.code == self.right_codes[0] else "y"
                         self.right_axes[which] = self._normalize(event.value, info)
-                        events.extend(self.mapper.right_stick(self.right_axes["x"]))
+                        right_changed = True
                     elif (device.fd == self.stick_source and info
                           and event.code in (self.ecodes.ABS_X, self.ecodes.ABS_Y)):
                         which = "x" if event.code == self.ecodes.ABS_X else "y"
                         self.axes[which] = self._normalize(event.value, info)
-                        events.extend(self.mapper.stick(self.axes["x"], self.axes["y"]))
+                        left_changed = True
                     elif event.code == self.ecodes.ABS_HAT0X:
                         if event.value < 0:
                             events.extend(self.mapper.dpad("LEFT"))
@@ -421,6 +439,7 @@ class JoyConGamepad:
                             events.extend(self.mapper.dpad("UP"))
                         elif event.value > 0:
                             events.extend(self.mapper.dpad("DOWN"))
+            flush_axes()
         return events
 
     def close(self):
