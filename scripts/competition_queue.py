@@ -533,6 +533,8 @@ def menu(routes, load_sequence, validate_target, *, connect, read_all,
     while True:
         cmd = input('queue> ').strip()
         if cmd.lower() == 'q':
+            if gamepad is not None:
+                gamepad.close()
             return
         if cmd.lower() == 'run':
             break
