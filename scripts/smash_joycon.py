@@ -43,6 +43,9 @@ class SmashMapper:
         self.cursor = (2, 2)
         self.line_index = 0
         self.line_step = 0
+        self._line_reversed = False
+        self._line_aim = (0, 0)
+        self._draw_start = None
         self._command_state = 0
         self._command_since = 0.0
         self._electric_until = 0.0
@@ -91,7 +94,40 @@ class SmashMapper:
 
     @property
     def line(self):
-        return LINES[self.line_index]
+        label, cells = LINES[self.line_index]
+        return label, tuple(reversed(cells)) if self._line_reversed else cells
+
+    def _select_line(self, index, *, reverse=False, method="stick"):
+        self.line_index = index
+        self._line_reversed = reverse
+        self.line_step = 0
+        label, cells = self.line
+        direction = " reverse" if reverse else ""
+        return [("notice", f"LINE {label}{direction} ({method}): "
+                + " -> ".join(cells))]
+
+    def _line_from_aim(self, button):
+        """Row/column selection; diagonals have an intentional X/Y offset."""
+        dx, dy = self._line_aim
+        if dx and dy:
+            main = dx == dy  # NW-SE is main; NE-SW is the other.
+            if button == "Y":
+                main = not main  # Y selects the offset/opposite diagonal.
+            return 6 if main else 7
+        if button == "X":
+            return {-1: 0, 0: 1, 1: 2}[dy]  # top/middle/bottom rows
+        return {-1: 3, 0: 4, 1: 5}[dx]  # left/center/right columns
+
+    def _drawn_line(self, start, end):
+        """Two endpoints define a unique row, column, or diagonal."""
+        if start == end:
+            return None
+        for index, (_, cells) in enumerate(LINES):
+            if start in cells and end in cells:
+                return self._select_line(index,
+                        reverse=cells.index(start) > cells.index(end),
+                        method=f"draw {start} to {end}")
+        return None
 
     def _command_reset(self):
         self._command_state = 0
@@ -105,6 +141,11 @@ class SmashMapper:
         This is an OPTIONAL quick counter, not a servo-speed modifier.
         """
         x, y = max(-1., min(1., x)), max(-1., min(1., y))
+        if not self.armed:
+            threshold = .43
+            dx = 1 if x > threshold else (-1 if x < -threshold else 0)
+            dy = 1 if y > threshold else (-1 if y < -threshold else 0)
+            self._line_aim = (dx, dy)
         if self.armed:
             now = time.monotonic() if now is None else now
             if x > 0.55 and abs(y) < 0.35:
@@ -141,8 +182,13 @@ class SmashMapper:
         if name == "ZR":
             self.armed = pressed
             self._command_reset()
+            if pressed:
+                self._draw_start = None
             return [("notice", "Electric input ready (ZR held)" if pressed
                      else "Electric input released")]
+        if name == "X" and not pressed:
+            self._draw_start = None
+            return []
         if not pressed:
             return []
         if name in ("PLUS", "HOME"):
@@ -154,10 +200,19 @@ class SmashMapper:
         if name.startswith("DPAD_"):
             return self.dpad(name[5:], pressed)
         if name == "X" and not self.armed:
-            self.line_index = (self.line_index + 1) % len(LINES)
-            self.line_step = 0
-            label, squares = self.line
-            return [("notice", f"Line preview: {label}: {' '.join(squares)}")]
+            # Tap = direct stick+X selection. Hold X and tap Y at another
+            # endpoint for freehand line drawing. Neither sends a motor command.
+            self._draw_start = self.square
+            return self._select_line(self._line_from_aim("X"),
+                                     method="left-stick + X")
+        if name == "Y" and not self.armed:
+            if self._draw_start is not None:
+                drawn = self._drawn_line(self._draw_start, self.square)
+                if drawn is not None:
+                    self._draw_start = None
+                    return drawn
+            return self._select_line(self._line_from_aim("Y"),
+                                     method="left-stick + Y (offset)")
         if name == "A":
             now = time.monotonic() if now is None else now
             combo = self.selection
@@ -170,8 +225,10 @@ class SmashMapper:
                 return [("notice", "Incomplete electric input: no motion queued")]
             return [("add_combo", combo)]
         if name == "Y":
-            return [("notice", f"Selected: block {self.source_index+1} "
-                    f"({self.pickup}) -> {self.square}. Putting disabled.")]
+            label, cells = self.line
+            return [("notice", f"Line {label}: {' -> '.join(cells)}; "
+                    f"block {self.source_index+1} {self.pickup}. "
+                    "Putting disabled.")]
         if name == "R" and self.armed:
             self._command_reset()
             return [("replace_pending", self.square + "a"),
@@ -271,12 +328,14 @@ class JoyConGamepad:
         }
         # Neutral normalized stick; directions persist until a new non-neutral reading.
         self.axes = {"x": 0., "y": 0.}
-        self.report("SMASH: LEFT stick aim; D-pad LEFT/UP/RIGHT selects "
+        self.report("SMASH: LEFT stick aims; D-pad LEFT/UP/RIGHT selects "
                     "Plate B-left / Plate A-front / Plate B-right; RIGHT stick "
-                    "LEFT/RIGHT selects one of two blocks on that plate. "
-                    "A=pickup+place; B=undo; ZR+B=clear pending; "
-                    "X=cycle line; ZR+X=next line; ZR+L=priority place; "
-                    "ZR+R=priority attack; ZR+F,D,DF+A=Electric place; "
+                    "LEFT/RIGHT selects one of two blocks per plate. "
+                    "A=pickup+place; B=undo; ZR+B=clear; "
+                    "stick+X=row or diagonal; stick+Y=column or offset diagonal; "
+                    "hold X at start, move stick, tap Y=draw winning line; "
+                    "ZR+X=queue next square of selected line; "
+                    "ZR+L=priority place; ZR+R=priority attack; "
                     "PLUS/HOME=STOP. NO PUTTING.")
         self.report("A pickup+place is queued ONLY if both saved motion names exist. "
                     "A gamepad disconnect stops playback; physical E-stop remains required.")
