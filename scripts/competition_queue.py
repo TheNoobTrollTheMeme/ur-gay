@@ -231,25 +231,36 @@ def eligible_blend(previous, current, following, names):
 
 
 class KeyInput:
-    """Nonblocking raw-key queue editor; Space/Q/Escape always stop immediately."""
+    """Raw-key editor. Space/Esc/Ctrl+C always stop, even mid-command."""
     def __init__(self):
         self.command = None
+
+    @staticmethod
+    def translate(command):
+        command = command.strip().lower()
+        if command.startswith('a=') and command[2:]:
+            return 'a ' + command[2:]
+        match = re.fullmatch(r'a([a-z0-9_.-]+)', command)
+        if match:
+            return 'a ' + match[1]
+        match = re.fullmatch(r'd([1-9]\d*)', command)
+        if match:
+            return 'd ' + match[1]
+        match = re.fullmatch(r'(m|i)([1-9]\d*),([a-z0-9_.-]+)', command)
+        if match:
+            return match[1] + ' ' + match[2] + ' ' + match[3]
+        return command
 
     def feed(self, key):
         if not key:
             return None
-        if key in STOP_KEYS:
+        # Allow lowercase q in saved names after ":" has opened the editor.
+        if key in STOP_KEYS and not (key == 'q' and self.command is not None):
             return ('stop', None)
         if self.command is not None:
             if key in ('\r', '\n'):
-                done = self.command
+                done = self.translate(self.command)
                 self.command = None
-                match = re.fullmatch(r'(a|d)([1-9][0-9]*)', done)
-                if match:
-                    done = f'{match[1]} {match[2]}'
-                match = re.fullmatch(r'(m|i)([1-9][0-9]*),([1-9][0-9]*)', done)
-                if match:
-                    done = f'{match[1]} {match[2]} {match[3]}'
                 return ('edit', done)
             if key in ('\x7f', '\x08'):
                 self.command = self.command[:-1]
@@ -258,7 +269,8 @@ class KeyInput:
             return None
         if key == ':':
             self.command = ''
-            return ('prompt', 'Enter command then Enter (:a2 / :d1 / :m2,1 / :i1,2). SPACE ALWAYS STOPS.')
+            return ('prompt', 'Live edit: :a=grab1 :a12 :i1,grab2 :d1 :m2,1 :clear. '
+                    'Enter confirms. SPACE/Esc=STOP.')
         if key in '123456789':
             return ('add', key)
         if key in ('l', 'L', '?'):
@@ -292,7 +304,7 @@ class InputManager:
             return
         if action == 'end':
             self.end_after_queue = True
-            self.report('Finish queue then exit enabled. No additional square required.')
+            self.report('Finish the pending queue, then exit; new entries may still be added.')
             return
         try:
             if action == 'add':
@@ -392,8 +404,9 @@ def playback(catalog, plan, profile, *, connect, read_all, enable_all_torque,
     enabled = False
     try:
         with terminal_class() as terminal:
-            report('LIVE QUEUE: 1..9 append | :a2 | :i1,2 | :d1 | :m2,1 | '
-                   ':clear | L=list | Backspace=undo | E=finish | Space/Q/Esc=STOP')
+            report('LIVE MOTION QUEUE: 1..9 append by ID | :a=grab1 | :a12 | '
+                   ':i1,grab2 | :d1 | :m2,1 | :clear | L=list | '
+                   'Backspace=undo | E=finish | Space/Q/Esc=STOP')
             report(plan.show())
             while True:
                 if not manager.poll(terminal):
@@ -407,7 +420,7 @@ def playback(catalog, plan, profile, *, connect, read_all, enable_all_torque,
                 number = plan.pop()
                 manager.active = number
                 steps = catalog[number]  # Immutable snapshot, never loaded mid-motion.
-                report(f'\nRunning square {number} ({len(steps)} waypoints). {plan.show(number)}')
+                report(f'\nRunning motion {plan.name(number)} ({len(steps)} waypoints). {plan.show(number)}')
                 if not enabled:
                     measured = read_all(handler)
                     # Seed at measured pose BEFORE enabling. No jump to saved first point.
@@ -426,7 +439,7 @@ def playback(catalog, plan, profile, *, connect, read_all, enable_all_torque,
                                      settings, check_result, clock=clock, sleep=sleep):
                         return False
                 manager.active = None
-                report(f'Square {number} complete. {plan.show()}')
+                report(f'Motion {plan.name(number)} complete. {plan.show()}')
             report('Queue finished. Torque remains ON at the last pose; support the arm.')
             return True
     finally:
@@ -441,36 +454,35 @@ def playback(catalog, plan, profile, *, connect, read_all, enable_all_torque,
 def menu(routes, load_sequence, validate_target, *, connect, read_all,
          enable_all_torque, disable_all_torque, terminal_class,
          settings, check_result, report=print):
-    """Configure queue and speed once; edit further while motors are moving."""
+    """Queue ANY saved validated motion by name or ID, before or during motion."""
     if not routes:
-        report('No move/place pairs found.')
+        report('No saved waypoint sequences found.')
         return
-    if len(routes) > 9:
-        raise ValueError('Live one-key queue supports at most 9 squares.')
-    catalog = build_catalog(routes, load_sequence, validate_target,
-                            skip_invalid=True, report=report)
+    catalog, labels, aliases = build_motion_catalog(
+        routes, load_sequence, validate_target, report=report)
     if not catalog:
-        report('No valid competition squares. Repair the listed waypoint(s) using '
-               'script 6 menu 1; nothing was sent to the motors.')
+        report('No valid saved waypoint motions. Repair recordings in script 6 menu 1.')
         return
-    for number, path in enumerate(routes, 1):
-        if str(number) in catalog:
-            report(f'{number}: {path.stem[:-1]} ({len(catalog[str(number)])} waypoints) [READY]')
-    report('Only READY numbers can be queued. Disabled squares cannot be selected.')
-    raw = input('Initial queue (e.g. 1 2 3; blank=empty; Q=cancel): ').strip().lower()
+
+    for identifier in sorted(catalog, key=int):
+        report(f'{identifier}: {labels[identifier]} '
+               f'({len(catalog[identifier])} points) [READY]')
+    report('Use saved names (grab1, c1r1a, custom) or the listed IDs.')
+    report('Square macros (e.g. c1r1) include its m and p sequences.')
+    report('Only READY names/IDs can run. Collision clearance is NOT verified.')
+
+    raw = input('Initial queue (e.g. grab1 c1r1a grab2; blank=empty; Q=cancel): ').strip().lower()
     if raw == 'q':
         return
-    plan = QueuePlan(catalog)
-    for item in raw.split():
-        plan.append(item)
+    plan = QueuePlan(catalog, raw.split(), aliases=aliases, labels=labels)
     speed_input = input('Profile N=normal 300/20, F=fast 600/35, '
                         'T=turbo 1200/60 [N]: ').strip().lower()
     if speed_input not in ('', 'n', 'f', 't'):
         raise ValueError('Choose N, F or T')
     profile = {'': 'normal', 'n': 'normal', 'f': 'fast', 't': 'turbo'}[speed_input]
     report(f'Selected {profile}: arm {PROFILES[profile]}; gripper <=300/20.')
-    report('Only prevalidated placement routes. NO attack/flick paths or collision detection.')
-    report('Prestart queue editor: a 2, i 1 2, d 1, m 2 1, clear, l, RUN, Q.')
+    report('No collision checking, automatic grip-force control or firmware overclock.')
+    report('Prestart queue editor: a grab1, i 1 grab2, d 1, m 2 1, clear, l, RUN, Q.')
     while True:
         cmd = input('queue> ').strip()
         if cmd.lower() == 'q':
@@ -481,7 +493,7 @@ def menu(routes, load_sequence, validate_target, *, connect, read_all,
             report(plan.edit(cmd))
         except (ValueError, IndexError) as error:
             report(f'Queue edit rejected: {error}')
-    report('Starting live queue. Physical power stop ready; clear all paths and support arm.')
+    report('Starting live queue. Clear ALL future paths; support arm; physical stop ready.')
     return playback(catalog, plan, profile, connect=connect, read_all=read_all,
                     enable_all_torque=enable_all_torque,
                     disable_all_torque=disable_all_torque,
