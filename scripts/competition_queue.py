@@ -118,6 +118,7 @@ def build_catalog(routes, load_sequence, validate_target, *,
                 raise ValueError('Only move/place route pairs can be queued.')
             place_path = move_path.with_name(move_path.stem[:-1] + 'p.json')
             for path in (move_path, place_path):
+                number = None
                 _, points = load_sequence(path)
                 if not points:
                     raise ValueError('Sequence has no waypoints.')
