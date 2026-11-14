@@ -19,6 +19,7 @@ from arm_helpers import (connect, disable_all_torque, enable_all_torque,
 from terminal_keys import RawTerminal
 import competition_queue as competition
 from raw_capture_conversion import convert_recording_to_raw
+from validated_raw_save import save_raw_recording, validate_raw_recording
 
 spec = importlib.util.spec_from_file_location('waypoints', ROOT / 'scripts/05_waypoint_sequence.py')
 wp = importlib.util.module_from_spec(spec)
@@ -35,16 +36,25 @@ def choose():
 
 
 def commit(path, data):
-    # Validate everything before touching an existing recording.
-    for point in data['points']:
-        if 'input_values' in point:
-            wp.parse_point_values(point['input_values'], data['input_type'])
-    if path.exists():
-        backup = path.with_name(path.name + '.' + datetime.now().strftime('%Y%m%d-%H%M%S-%f') + '.bak')
-        shutil.copy2(path, backup)
-        print(f'Backup: {backup.name}')
-    path.parent.mkdir(exist_ok=True)
-    wp.save_sequence(path, data)
+    """Raw mode stores measured encoder ticks without legacy angle checks.
+
+    The old angle-based path is unchanged. Raw files still require complete,
+    in-range integer ticks, and old recordings are backed up before writing.
+    """
+    if data.get('input_type') == 'raw':
+        backup = save_raw_recording(path, data, settings.JOINT_NAMES)
+        if backup is not None:
+            print(f'Backup: {backup.name}')
+    else:
+        for point in data['points']:
+            if 'input_values' in point:
+                wp.parse_point_values(point['input_values'], data['input_type'])
+        if path.exists():
+            backup = path.with_name(path.name + '.' + datetime.now().strftime('%Y%m%d-%H%M%S-%f') + '.bak')
+            shutil.copy2(path, backup)
+            print(f'Backup: {backup.name}')
+        path.parent.mkdir(exist_ok=True)
+        wp.save_sequence(path, data)
     if path.stem.endswith(('m', 'p')):
         refresh_attacks()
 
@@ -119,18 +129,19 @@ def record():
             raise ValueError('Attack files are automatic. Edit the matching m or p sequence instead.')
         data = json.loads(path.read_text())
         if data.get('input_type') != 'raw':
-            print('This legacy recording stores ANGLES. Angle calibration may reject '
-                  'a pose that the servo reports in valid raw ticks.')
-            response = input('Convert ALL existing waypoints to RAW ticks for this '
-                             'recording? Original is backed up on first save. [y/N]: ')
-            if response.strip().lower() in ('y', 'yes'):
-                _, decoded = wp.load_sequence(path)
-                data = convert_recording_to_raw(
-                    data, decoded, settings.JOINT_NAMES)
-                print('RAW conversion staged in memory. No file changed yet. '
-                      'First saved capture will back up the old recording.')
-            else:
-                print('Keeping angle input mode; its angle checks still apply.')
+            print('ANGLE-format recording. Hand-captured raw ticks avoid the '
+                  'app-specific ±90-degree parser during recording.')
+            response = input('Enter converts existing points to RAW ticks '
+                             '(backup on first save), or Q cancels: ').strip().lower()
+            if response == 'q':
+                return
+            if response:
+                raise ValueError('Press Enter to convert or Q to cancel.')
+            _, decoded = wp.load_sequence(path)
+            data = convert_recording_to_raw(
+                data, decoded, settings.JOINT_NAMES)
+            print('RAW conversion staged. Original untouched until save; '
+                  'first save creates a timestamped backup.')
     while True:
         for i, point in enumerate(data['points'], 1):
             print(f'{i}: {point.get("input_values", point.get("positions_raw"))}')
@@ -158,7 +169,13 @@ def record():
         else:
             values = [position_to_angle(j, positions[j])
                       for j in settings.JOINT_NAMES]
-        wp.parse_point_values(values, data['input_type'])
+        if data['input_type'] == 'raw':
+            # Only the raw-register and data-shape checks; do not roundtrip
+            # a hand-taught pose through legacy configured ANGLE_LIMITS.
+            if len(values) != len(settings.JOINT_NAMES):
+                raise ValueError('Captured pose is missing a joint.')
+        else:
+            wp.parse_point_values(values, data['input_type'])
         point = dict(data['points'][index]) if index < len(data['points']) else {}
         point.pop('positions_raw', None)
         point['input_values'] = values
