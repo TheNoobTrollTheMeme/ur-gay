@@ -18,6 +18,7 @@ from arm_helpers import (connect, disable_all_torque, enable_all_torque,
                          read_all, move_all_sync, position_to_angle, check_result)
 from terminal_keys import RawTerminal
 import competition_queue as competition
+from raw_capture_conversion import convert_recording_to_raw
 
 spec = importlib.util.spec_from_file_location('waypoints', ROOT / 'scripts/05_waypoint_sequence.py')
 wp = importlib.util.module_from_spec(spec)
@@ -117,6 +118,19 @@ def record():
         if json.loads(path.read_text()).get('derived_from'):
             raise ValueError('Attack files are automatic. Edit the matching m or p sequence instead.')
         data = json.loads(path.read_text())
+        if data.get('input_type') != 'raw':
+            print('This legacy recording stores ANGLES. Angle calibration may reject '
+                  'a pose that the servo reports in valid raw ticks.')
+            response = input('Convert ALL existing waypoints to RAW ticks for this '
+                             'recording? Original is backed up on first save. [y/N]: ')
+            if response.strip().lower() in ('y', 'yes'):
+                _, decoded = wp.load_sequence(path)
+                data = convert_recording_to_raw(
+                    data, decoded, settings.JOINT_NAMES)
+                print('RAW conversion staged in memory. No file changed yet. '
+                      'First saved capture will back up the old recording.')
+            else:
+                print('Keeping angle input mode; its angle checks still apply.')
     while True:
         for i, point in enumerate(data['points'], 1):
             print(f'{i}: {point.get("input_values", point.get("positions_raw"))}')
@@ -137,8 +151,13 @@ def record():
         positions = capture()
         if positions is None:
             continue
-        values = [positions[j] if data['input_type'] == 'raw' else position_to_angle(j, positions[j])
-                  for j in settings.JOINT_NAMES]
+        if data['input_type'] == 'raw':
+            values = [positions[j] for j in settings.JOINT_NAMES]
+            if any(type(v) is not int or not 0 <= v <= 4095 for v in values):
+                raise ValueError('Captured servo positions must be raw integers 0..4095.')
+        else:
+            values = [position_to_angle(j, positions[j])
+                      for j in settings.JOINT_NAMES]
         wp.parse_point_values(values, data['input_type'])
         point = dict(data['points'][index]) if index < len(data['points']) else {}
         point.pop('positions_raw', None)
