@@ -1,4 +1,5 @@
 """Hardware-free tests for the read-only raw debug capture."""
+import ast
 import json
 import sys
 import tempfile
@@ -41,10 +42,15 @@ class RawCaptureTests(unittest.TestCase):
             module.make_snapshot({"shoulder": "97.73"}, ["shoulder"])
 
     def test_no_servo_target_write_functions(self):
-        script = path.read_text()
-        self.assertNotIn("move_all_sync(", script)
-        self.assertNotIn("enable_all_torque(", script)
-        self.assertNotIn("SyncWritePosEx(", script)
+        tree = ast.parse(path.read_text())
+        names = {node.func.id for node in ast.walk(tree)
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+        attributes = {node.func.attr for node in ast.walk(tree)
+                      if isinstance(node, ast.Call) and
+                      isinstance(node.func, ast.Attribute)}
+        self.assertFalse(names & {"move_all_sync", "enable_all_torque",
+                                  "SyncWritePosEx"})
+        self.assertNotIn("SyncWritePosEx", attributes)
 
 
 if __name__ == "__main__":
