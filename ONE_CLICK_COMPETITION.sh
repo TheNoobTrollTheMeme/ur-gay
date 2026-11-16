@@ -17,7 +17,9 @@ finish() {
 }
 trap finish EXIT
 
-if [[ "${1:-}" == "--install-desktop" ]]; then
+launch_mode="${1:-}"
+
+if [[ "$launch_mode" == "--install-desktop" ]]; then
     desktop="${XDG_DESKTOP_DIR:-$HOME/Desktop}"
     mkdir -p -- "$desktop"
     shortcut="$desktop/ROBOARM Competition.desktop"
@@ -37,13 +39,26 @@ Icon=applications-engineering
 Categories=Education;Development;
 EOF
     chmod +x -- "$shortcut"
-    echo "Desktop shortcut installed: $shortcut"
-    echo "Double-click it to update and open the Script 6 menu."
+    remap_shortcut="$desktop/ROBOARM Remap.desktop"
+    cat > "$remap_shortcut" <<EOF
+[Desktop Entry]
+Type=Application
+Name=ROBOARM Remap
+Comment=Offline tray layout and winning-line macro editor
+Exec=/usr/bin/env ONE_CLICK_PAUSE=1 /bin/bash "$quoted_path/ONE_CLICK_COMPETITION.sh" --remap
+Terminal=true
+Icon=applications-engineering
+Categories=Education;Development;
+EOF
+    chmod +x -- "$remap_shortcut"
+    echo "Desktop shortcuts installed: $shortcut and $remap_shortcut"
+    echo "Use ROBOARM Remap to change tray/grab assignments without moving the robot."
     exit 0
 fi
 
-if [[ $# -ne 0 ]]; then
-    echo "Usage: bash ONE_CLICK_COMPETITION.sh [--install-desktop]" >&2
+if [[ $# -gt 1 || ( -n "$launch_mode" && "$launch_mode" != "--remap" &&
+                    "$launch_mode" != "--macro-board" ) ]]; then
+    echo "Usage: bash ONE_CLICK_COMPETITION.sh [--install-desktop|--remap|--macro-board]" >&2
     exit 2
 fi
 
@@ -143,9 +158,20 @@ echo "Updated $changed script(s). Recorded motions were NOT changed."
 if [[ -d "$backup_dir" ]]; then
     echo "Original installed scripts backed up to: $backup_dir"
 fi
-echo "Opening Script 6. Choose option 8 for Competition Mode."
-echo "No robot motion occurs until you explicitly start playback."
 echo
-
 cd -- "$project"
-python3 scripts/06_live_grid_tool.py
+case "$launch_mode" in
+    --remap)
+        echo "Opening OFFLINE tray/winning-line remapper (no motor commands)."
+        python3 scripts/arm_board.py --remap
+        ;;
+    --macro-board)
+        echo "Opening terminal Macro Board in PREVIEW mode."
+        python3 scripts/arm_board.py --terminal
+        ;;
+    *)
+        echo "Opening Script 6. Choose option 8 for Competition Mode."
+        echo "No robot motion occurs until you explicitly start playback."
+        python3 scripts/06_live_grid_tool.py
+        ;;
+esac
