@@ -15,9 +15,10 @@ TRAY_ROWS = (
     ("1 Cylinder", "", "           6 Trophy"),
 )
 ENTER_KEYS = (10, 13, curses.KEY_ENTER)
+BACKSPACE_KEYS = (8, 127, curses.KEY_BACKSPACE)
 
 
-def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activity, busy, turbo):
+def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activity, busy, turbo, queue_count):
     screen.erase()
     height, width = screen.getmaxyx()
 
@@ -26,7 +27,10 @@ def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activit
             screen.addnstr(y, x, text, width - x - 1, attr)
 
     line(0, f"ARM BOARD   {mode.upper()}   {'LIVE' if live else 'PREVIEW'}   {'TURBO' if turbo else 'NORMAL'}", curses.A_BOLD)
-    placement_keys = "1-9 selects a square   Arrows + Enter also work"
+    placement_keys = (
+        f"1-9 or arrows + Enter add a square   Queued: {queue_count}"
+        if mode == "queue" else "1-9 selects a square   Arrows + Enter also work"
+    )
     line(1, placement_keys)
     for row in range(3):
         for col in range(3):
@@ -46,13 +50,17 @@ def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activit
     else:
         pickup_label = f"Tray: Grab {pickup} ({TRAY_LABELS[pickup]})"
     line(11, pickup_label)
-    line(12, "G tray   0 clear   A attack/place   L live/preview")
+    line(12, "G tray   0 clear tray   B board/queue   L live/preview")
     line(13, "Space/Esc stop   Q quit")
+    if mode == "queue":
+        line(14, "R run queue   Backspace undo   C clear queue")
+    else:
+        line(14, "A attack/place")
     if pending:
         help_text = "Confirm a held cylinder or cube. Y run / N cancel." if pending.requires_held_block else "Y run attack / N cancel."
-        line(14, help_text, curses.A_BOLD)
+        line(16, help_text, curses.A_BOLD)
     elif busy:
-        line(14, "Playback active", curses.A_BOLD)
+        line(16, "Playback active", curses.A_BOLD)
 
     line(15, status, curses.A_BOLD)
     if height > 17 and width > 1:
@@ -64,7 +72,7 @@ def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activit
     screen.refresh()
 
 
-def terminal_loop(screen, build_plan, play, turbo):
+def terminal_loop(screen, build_plan, play, compose_queue, turbo):
     try:
         curses.curs_set(0)
     except curses.error:
@@ -76,6 +84,8 @@ def terminal_loop(screen, build_plan, play, turbo):
     cursor = (0, 0)
     mode = "place"
     live = selecting = closing = False
+    queueing = False
+    placements = []
     pickup = None
     pending = None
     thread = None
@@ -117,7 +127,10 @@ def terminal_loop(screen, build_plan, play, turbo):
                     status = message
             if closing and thread is None:
                 return
-            draw(screen, cursor, mode, live, pickup, selecting, pending, status, activity, thread is not None, turbo)
+            draw(
+                screen, cursor, "queue" if queueing else mode, live, pickup,
+                selecting, pending, status, activity, thread is not None, turbo, len(placements),
+            )
             key = screen.getch()
             if key in (ord("q"), ord("Q")):
                 closing = True
@@ -155,11 +168,43 @@ def terminal_loop(screen, build_plan, play, turbo):
             if key == ord("0"):
                 pickup = None
                 continue
+            if key in (ord("b"), ord("B")):
+                queueing = not queueing
+                status = "Queue ready" if queueing else "Board ready"
+                continue
             if key in (ord("a"), ord("A")):
-                mode = "attack" if mode == "place" else "place"
+                if not queueing:
+                    mode = "attack" if mode == "place" else "place"
                 continue
             if key in (ord("l"), ord("L")):
                 live = not live
+                continue
+            if queueing and key in BACKSPACE_KEYS:
+                if placements:
+                    status = f"Removed {placements.pop().cell}"
+                continue
+            if queueing and key in (ord("c"), ord("C")):
+                placements.clear()
+                status = "Queue cleared"
+                continue
+            if queueing and key in (ord("r"), ord("R")):
+                if not placements:
+                    status = "Queue is empty"
+                    continue
+                try:
+                    plan = compose_queue(tuple(placements))
+                except (OSError, ValueError, RuntimeError) as error:
+                    status = "Could not build queue"
+                    activity.append(str(error))
+                    continue
+                activity.append(
+                    f"Queue: {len(placements)} placements, {len(plan.waypoints)} waypoints"
+                )
+                if live:
+                    placements.clear()
+                    start(plan)
+                else:
+                    status = "Queue preview. Press L then R to run."
                 continue
             if ord("1") <= key <= ord("9"):
                 index = key - ord("1")
@@ -168,12 +213,18 @@ def terminal_loop(screen, build_plan, play, turbo):
                 continue
 
             try:
-                plan = build_plan(cursor[0] + 1, cursor[1] + 1, mode, pickup)
+                plan = build_plan(cursor[0] + 1, cursor[1] + 1, "place" if queueing else mode, pickup)
             except (OSError, ValueError, RuntimeError) as error:
                 status = "Could not build route"
                 activity.append(str(error))
                 continue
-            activity.append(f"{plan.cell}: {' > '.join(plan.phases)} ({len(plan.waypoints)} waypoints)")
+            description = f"{plan.cell}: {' > '.join(plan.phases)} ({len(plan.waypoints)} waypoints)"
+            if queueing:
+                placements.append(plan)
+                activity.append(f"{len(placements)}. {description}")
+                status = f"Queued {plan.cell}"
+                continue
+            activity.append(description)
             if plan.requires_held_block:
                 activity.append("Center: hold a cylinder or cube, or choose its tray slot.")
             if not live:
@@ -189,8 +240,8 @@ def terminal_loop(screen, build_plan, play, turbo):
             thread.join()
 
 
-def run_terminal(build_plan, play, *, turbo=False):
+def run_terminal(build_plan, play, *, compose_queue, turbo=False):
     try:
-        curses.wrapper(terminal_loop, build_plan, play, turbo)
+        curses.wrapper(terminal_loop, build_plan, play, compose_queue, turbo)
     except KeyboardInterrupt:
         pass

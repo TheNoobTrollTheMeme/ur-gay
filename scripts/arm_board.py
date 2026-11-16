@@ -115,6 +115,20 @@ def build_plan(script6, folder, col, row, mode, selected=None):
     return Plan(cell.upper(), mode, pickup, phases, (*grab, *approach, *place))
 
 
+def compose_queue(plans):
+    if not plans:
+        raise ValueError("The placement queue is empty.")
+    if any(plan.mode != "place" for plan in plans):
+        raise ValueError("Only placements can be added to the board queue.")
+    return Plan(
+        cell=f"{len(plans)} queued placements",
+        mode="place",
+        pickup=None,
+        phases=tuple(plan.cell for plan in plans),
+        waypoints=tuple(waypoint for plan in plans for waypoint in plan.waypoints),
+    )
+
+
 class StopInput:
     """Translate a GUI stop request into a Script 6 stop key."""
 
@@ -281,6 +295,7 @@ def main():
             run_terminal(
                 partial(build_plan, script6, motions),
                 partial(play, script6, turbo=args.turbo),
+                compose_queue=compose_queue,
                 turbo=args.turbo,
             )
         except curses.error as error:
