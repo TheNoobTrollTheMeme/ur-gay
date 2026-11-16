@@ -323,6 +323,17 @@ def make_plan(paths, mode):
     return plan
 
 
+def move_for_playback(handler, target, speed, acceleration):
+    """Use custom arm speed without accidentally accelerating the gripper."""
+    speed, acceleration = validate_playback_settings(speed, acceleration)
+    if (speed, acceleration) == (DEFAULT_SPEED, DEFAULT_ACCELERATION):
+        move_all_sync(handler, target, speed=DEFAULT_SPEED,
+                      acceleration=DEFAULT_ACCELERATION)
+    else:
+        competition.sync_targets(handler, settings, check_result, target,
+                                 (speed, acceleration), gripper_profile="normal")
+
+
 def test_grid(attack=False, auto=False):
     refresh_attacks()
     routes = cell_routes()
@@ -377,7 +388,8 @@ def test_grid(attack=False, auto=False):
                     return
                 # Seed the measured pose before enabling torque.
                 current = read_all(handler)
-                move_all_sync(handler, current, speed=speed, acceleration=acceleration)
+                move_all_sync(handler, current, speed=DEFAULT_SPEED,
+                              acceleration=DEFAULT_ACCELERATION)
                 if stopped(terminal):
                     return
                 enable_all_torque(handler)
@@ -386,7 +398,7 @@ def test_grid(attack=False, auto=False):
                     if stopped(terminal):
                         return
                     print(f'\r\n{label}', flush=True)
-                    move_all_sync(handler, positions, speed=speed, acceleration=acceleration)
+                    move_for_playback(handler, positions, speed, acceleration)
                     if not wait_move(handler, terminal):
                         return
             completed = True
@@ -446,7 +458,8 @@ def run_saved_sequence(name, *, auto=False, dry_run=False,
     try:
         with RawTerminal() as terminal:
             current = read_all(handler)
-            move_all_sync(handler, current, speed=speed, acceleration=acceleration)
+            move_all_sync(handler, current, speed=DEFAULT_SPEED,
+                              acceleration=DEFAULT_ACCELERATION)
             if stopped(terminal):
                 return
             enable_all_torque(handler)
@@ -463,7 +476,7 @@ def run_saved_sequence(name, *, auto=False, dry_run=False,
                 positions = points[i]
                 validate_target(positions)
                 print(f'\r\n{path.stem}: waypoint {i + 1}/{len(initial_points)}', flush=True)
-                move_all_sync(handler, positions, speed=speed, acceleration=acceleration)
+                move_for_playback(handler, positions, speed, acceleration)
                 if not wait_move(handler, terminal):
                     return
             completed = True
