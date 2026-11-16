@@ -18,7 +18,7 @@ ENTER_KEYS = (10, 13, curses.KEY_ENTER)
 BACKSPACE_KEYS = (8, 127, curses.KEY_BACKSPACE)
 
 
-def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activity, busy, turbo, queue_count, link_filename, speed_label=None):
+def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activity, busy, turbo, queue_count, link_filename, speed_label=None, tray_slots=None):
     screen.erase()
     height, width = screen.getmaxyx()
 
@@ -39,19 +39,31 @@ def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activit
             attr = curses.A_REVERSE if (col, row) == cursor else curses.A_NORMAL
             line(3 + row, f" {key} C{col + 1}R{row + 1} ", attr, 12 * col)
 
-    line(7, "LEFT TRAY           CENTER TRAY         RIGHT TRAY", curses.A_BOLD)
-    for row, trays in enumerate(TRAY_ROWS, 8):
-        for col, tray in enumerate(trays):
-            line(row, tray, x=20 * col)
+    if tray_slots:
+        line(7, "TRAY SLOTS: ID  ZONE  BLOCK  GRAB", curses.A_BOLD)
+        names = {"B-left": "BL", "A-front": "AF", "B-right": "BR"}
+        for idx, entry in enumerate(sorted(tray_slots, key=lambda item: item["slot"])):
+            col, row = divmod(idx, 2)
+            label = (f'{entry["slot"]} {names.get(entry["zone"], "??")} '
+                     f'{entry["block"][:4]} {str(entry["grab"] or "-")[:7]}')
+            line(8 + row, label, x=20 * col)
+    else:
+        line(7, "LEFT TRAY           CENTER TRAY         RIGHT TRAY", curses.A_BOLD)
+        for row, trays in enumerate(TRAY_ROWS, 8):
+            for col, tray in enumerate(trays):
+                line(row, tray, x=20 * col)
 
     if selecting:
         pickup_label = "Press 1-6 for a tray slot, or 0 to clear"
     elif pickup is None:
         pickup_label = "Tray: no slot selected"
     else:
-        pickup_label = f"Tray: Grab {pickup} ({TRAY_LABELS[pickup]})"
+        assigned = next((slot for slot in (tray_slots or ())
+                         if slot["slot"] == pickup), None)
+        pickup_label = (f'Tray slot {pickup}: {assigned["block"]} -> {assigned["grab"]}'
+                        if assigned else f"Tray: Grab {pickup} ({TRAY_LABELS[pickup]})")
     line(11, pickup_label)
-    line(12, "G tray   0 clear tray   B board/queue   L live/preview")
+    line(12, "G slot   0 clear   B board/queue   L live/preview   Remap: --remap")
     if mode == "queue":
         line(13, "Space/Esc stop   Q quit   S sync lines   U link old line")
         line(14, "W export line   R run   Backspace undo   C clear")
@@ -76,7 +88,7 @@ def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activit
     screen.refresh()
 
 
-def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, sync_winning_lines, link_winning_line, turbo, speed_label=None):
+def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, sync_winning_lines, link_winning_line, turbo, speed_label=None, tray_slots=None):
     try:
         curses.curs_set(0)
     except curses.error:
@@ -135,7 +147,7 @@ def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, 
             draw(
                 screen, cursor, "queue" if queueing else mode, live, pickup,
                 selecting, pending, status, activity, thread is not None, turbo, len(placements), link_filename,
-                speed_label=speed_label,
+                speed_label=speed_label, tray_slots=tray_slots,
             )
             key = screen.getch()
             if link_filename is not None:
@@ -288,11 +300,11 @@ def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, 
             thread.join()
 
 
-def run_terminal(build_plan, play, *, compose_queue, export_winning_line, sync_winning_lines, link_winning_line, turbo=False, speed_label=None):
+def run_terminal(build_plan, play, *, compose_queue, export_winning_line, sync_winning_lines, link_winning_line, turbo=False, speed_label=None, tray_slots=None):
     try:
         curses.wrapper(
             terminal_loop, build_plan, play, compose_queue, export_winning_line,
-            sync_winning_lines, link_winning_line, turbo, speed_label,
+            sync_winning_lines, link_winning_line, turbo, speed_label, tray_slots,
         )
     except KeyboardInterrupt:
         pass
