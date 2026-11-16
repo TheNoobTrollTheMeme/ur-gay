@@ -57,8 +57,8 @@ EOF
 fi
 
 if [[ $# -gt 1 || ( -n "$launch_mode" && "$launch_mode" != "--remap" &&
-                    "$launch_mode" != "--macro-board" ) ]]; then
-    echo "Usage: bash ONE_CLICK_COMPETITION.sh [--install-desktop|--remap|--macro-board]" >&2
+                    "$launch_mode" != "--macro-board" && "$launch_mode" != "--menu" ) ]]; then
+    echo "Usage: bash ONE_CLICK_COMPETITION.sh [--install-desktop|--remap|--macro-board|--menu]" >&2
     exit 2
 fi
 
@@ -96,11 +96,11 @@ fi
 
 # Deploy only the linked launcher/playback dependencies; never modify motions/*.json.
 scripts=(
+    05_bookmark_compat.py
     06_live_grid_tool.py
     pose_bookmarks.py
     competition_queue.py
     playback_speed.py
-    pose_bookmarks.py
     raw_playback_validation.py
     raw_capture_conversion.py
     validated_raw_save.py
@@ -164,6 +164,11 @@ fi
 echo
 cd -- "$project"
 case "$launch_mode" in
+    --menu)
+        echo "Refreshing local arm command, then opening the combined script menu."
+        bash "$repo/ARM_MENU.sh" --install
+        bash "$repo/ARM_MENU.sh"
+        ;;
     --remap)
         echo "Opening OFFLINE tray/winning-line remapper (no motor commands)."
         python3 scripts/arm_board.py --remap
