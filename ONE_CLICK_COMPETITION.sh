@@ -99,6 +99,7 @@ scripts=(
     05_bookmark_compat.py
     06_live_grid_tool.py
     pose_bookmarks.py
+    batch_paste_bookmark_joint.py
     competition_queue.py
     playback_speed.py
     raw_playback_validation.py
