@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 import time
+from playback_speed import prompt_playback_settings, validate_playback_settings
 
 # Conservative experimental profiles, not measured safe limits. The ST3215
 # documentation demonstrates larger registers, but this program does not
@@ -394,20 +395,30 @@ class InputManager:
         return not self.stopped
 
 
+def resolve_speed_profile(profile, *, gripper=False):
+    """A named profile or (speed, acceleration) pair, validated before motion."""
+    profiles = GRIPPER_PROFILES if gripper else PROFILES
+    if isinstance(profile, tuple):
+        if len(profile) != 2:
+            raise ValueError("Custom speed profile must be (speed, acceleration).")
+        return validate_playback_settings(*profile)
+    if profile not in profiles:
+        raise ValueError("Unknown gripper speed profile" if gripper
+                         else "Unknown competition speed profile")
+    return profiles[profile]
+
+
 def sync_targets(handler, settings, check_result, target, profile, *, gripper_profile="normal"):
     """Synchronized movement with an independently selectable gripper profile."""
-    if profile not in PROFILES:
-        raise ValueError("Unknown competition speed profile")
-    if gripper_profile not in GRIPPER_PROFILES:
-        raise ValueError("Unknown gripper speed profile")
-    speed, accel = PROFILES[profile]
+    speed, accel = resolve_speed_profile(profile)
+    grip_speed, grip_accel = resolve_speed_profile(gripper_profile, gripper=True)
     if not all(name in target for name in settings.JOINT_NAMES):
         raise ValueError('Incomplete waypoint')
     if not callable(getattr(handler, 'SyncWritePosEx', None)) or not hasattr(handler, 'groupSyncWrite'):
         raise RuntimeError('Installed servo SDK lacks per-joint SyncWritePosEx; no move sent.')
     try:
         for name in settings.JOINT_NAMES:
-            joint_speed, joint_accel = (GRIPPER_PROFILES[gripper_profile]
+            joint_speed, joint_accel = ((grip_speed, grip_accel)
                                         if name == 'gripper' else (speed, accel))
             result = handler.SyncWritePosEx(settings.SERVO_IDS[name], target[name],
                                             joint_speed, joint_accel)
@@ -461,10 +472,8 @@ def playback(catalog, plan, profile, *, connect, read_all, enable_all_torque,
              gripper_profile='normal', gamepad=None, report=print,
              clock=time.monotonic, sleep=time.sleep):
     """Execute editable pending queue. Motor commands stay in this one thread."""
-    if profile not in PROFILES:
-        raise ValueError('Unknown speed profile')
-    if gripper_profile not in GRIPPER_PROFILES:
-        raise ValueError('Unknown gripper speed profile')
+    resolve_speed_profile(profile)
+    resolve_speed_profile(gripper_profile, gripper=True)
     manager = InputManager(plan, report, gamepad=gamepad)
     port, handler = connect()
     completed = False
@@ -543,11 +552,12 @@ def menu(routes, load_sequence, validate_target, *, connect, read_all,
     if raw == 'q':
         return
     plan = QueuePlan(catalog, raw.split(), aliases=aliases, labels=labels)
-    speed_input = input('Profile N=normal 300/20, F=fast 600/35, '
-                        'T=turbo 1200/60 [N]: ').strip().lower()
-    if speed_input not in ('', 'n', 'f', 't'):
-        raise ValueError('Choose N, F or T')
-    profile = {'': 'normal', 'n': 'normal', 'f': 'fast', 't': 'turbo'}[speed_input]
+    speed_input = input('Arm playback N=normal 300/20, F=fast 600/35, '
+                        'T=turbo 1200/60, C=custom [N]: ').strip().lower()
+    if speed_input not in ('', 'n', 'f', 't', 'c'):
+        raise ValueError('Choose N, F, T or C')
+    profile = (prompt_playback_settings() if speed_input == 'c'
+               else {'': 'normal', 'n': 'normal', 'f': 'fast', 't': 'turbo'}[speed_input])
     gripper_input = input('Gripper N=normal 300/20 [default], F=fast 600/35, '
                           'T=turbo 1200/60: ').strip().lower()
     if gripper_input not in ('', 'n', 'f', 't'):
@@ -560,8 +570,8 @@ def menu(routes, load_sequence, validate_target, *, connect, read_all,
         confirmation = input('Type CONFIRM to enable faster gripper, else use normal: ')
         if confirmation.strip() != 'CONFIRM':
             gripper_profile = 'normal'
-    report(f'Selected arm {profile} {PROFILES[profile]}; '
-           f'gripper {gripper_profile} {GRIPPER_PROFILES[gripper_profile]}.')
+    report(f'Selected arm {profile} {resolve_speed_profile(profile)}; '
+           f'gripper {gripper_profile} {resolve_speed_profile(gripper_profile, gripper=True)}.')
     report('No collision checking, automatic grip-force control or firmware overclock.')
     controller_input = input('Controller K=keyboard [default], J=Joy-Con Smash: ').strip().lower()
     if controller_input not in ('', 'k', 'j'):
