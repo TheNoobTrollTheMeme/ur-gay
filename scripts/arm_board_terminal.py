@@ -17,7 +17,7 @@ TRAY_ROWS = (
 ENTER_KEYS = (10, 13, curses.KEY_ENTER)
 
 
-def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activity, busy):
+def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activity, busy, turbo):
     screen.erase()
     height, width = screen.getmaxyx()
 
@@ -25,7 +25,7 @@ def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activit
         if 0 <= y < height and x < width - 1:
             screen.addnstr(y, x, text, width - x - 1, attr)
 
-    line(0, f"ARM BOARD   {mode.upper()}   {'LIVE' if live else 'PREVIEW'}", curses.A_BOLD)
+    line(0, f"ARM BOARD   {mode.upper()}   {'LIVE' if live else 'PREVIEW'}   {'TURBO' if turbo else 'NORMAL'}", curses.A_BOLD)
     placement_keys = "1-9 selects a square   Arrows + Enter also work"
     line(1, placement_keys)
     for row in range(3):
@@ -64,7 +64,7 @@ def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activit
     screen.refresh()
 
 
-def terminal_loop(screen, build_plan, play):
+def terminal_loop(screen, build_plan, play, turbo):
     try:
         curses.curs_set(0)
     except curses.error:
@@ -117,7 +117,7 @@ def terminal_loop(screen, build_plan, play):
                     status = message
             if closing and thread is None:
                 return
-            draw(screen, cursor, mode, live, pickup, selecting, pending, status, activity, thread is not None)
+            draw(screen, cursor, mode, live, pickup, selecting, pending, status, activity, thread is not None, turbo)
             key = screen.getch()
             if key in (ord("q"), ord("Q")):
                 closing = True
@@ -189,8 +189,8 @@ def terminal_loop(screen, build_plan, play):
             thread.join()
 
 
-def run_terminal(build_plan, play):
+def run_terminal(build_plan, play, *, turbo=False):
     try:
-        curses.wrapper(terminal_loop, build_plan, play)
+        curses.wrapper(terminal_loop, build_plan, play, turbo)
     except KeyboardInterrupt:
         pass

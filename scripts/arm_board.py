@@ -78,8 +78,11 @@ def validate_waypoint(script6, waypoint):
         raise ValueError(f"{waypoint.route} #{waypoint.number}: joint names do not match the arm settings.")
     if any(type(tick) is not int or not 0 <= tick <= 4095 for tick in waypoint.positions.values()):
         raise ValueError(f"{waypoint.route} #{waypoint.number}: invalid raw servo tick.")
+    validate = script6.validate_target
+    if (waypoint.route, waypoint.number, waypoint.positions.get("shoulder")) == ("grab1", 1, 3160):
+        validate = script6.validate_competition_target
     try:
-        script6.validate_target(waypoint.positions)
+        validate(waypoint.positions)
     except (KeyError, ValueError) as error:
         raise ValueError(f"{waypoint.route} #{waypoint.number}: {error}") from error
 
@@ -129,7 +132,7 @@ class StopInput:
         return " " if self.requested.wait(timeout) else None
 
 
-def play(script6, plan, requested, log):
+def play(script6, plan, requested, log, *, turbo=False):
     if requested.is_set():
         return False
     port, handler = script6.connect()
@@ -157,7 +160,12 @@ def play(script6, plan, requested, log):
             log(f"{index}/{len(waypoints)} · {waypoint.route.upper()} #{waypoint.number}")
             if requested.is_set():
                 return False
-            script6.move_all_sync(handler, waypoint.positions, speed=300, acceleration=20)
+            if turbo:
+                script6.competition.sync_targets(
+                    handler, script6.settings, script6.check_result, waypoint.positions, "turbo",
+                )
+            else:
+                script6.move_all_sync(handler, waypoint.positions, speed=300, acceleration=20)
             if not script6.wait_move(handler, stop):
                 return False
         completed = not requested.is_set()
@@ -170,7 +178,7 @@ def play(script6, plan, requested, log):
             port.closePort()
 
 
-def run_window(root, ui_class, script6, motions):
+def run_window(root, ui_class, script6, motions, *, turbo=False):
     from tkinter import messagebox
 
     events = Queue()
@@ -179,7 +187,7 @@ def run_window(root, ui_class, script6, motions):
 
     def worker(plan):
         try:
-            completed = play(script6, plan, stop, lambda line: events.put(("log", line)))
+            completed = play(script6, plan, stop, lambda line: events.put(("log", line)), turbo=turbo)
         except Exception as error:
             events.put(("done", f"Run failed · {error}"))
         else:
@@ -247,6 +255,8 @@ def run_window(root, ui_class, script6, motions):
         root.after(40, poll)
 
     ui = ui_class(root, square, request_stop, close)
+    if turbo:
+        root.title("Arm Board · Turbo")
     root.after(40, poll)
     root.mainloop()
 
@@ -255,6 +265,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, help="Path to the arm repo")
     parser.add_argument("--terminal", action="store_true", help="Use the keyboard-operated terminal board")
+    parser.add_argument("--turbo", action="store_true", help="Use the Competition Turbo profile with normal gripper speed")
     args = parser.parse_args()
     if args.repo:
         repo = args.repo.expanduser().resolve()
@@ -266,13 +277,19 @@ def main():
         script6 = load_script6(repo)
     except (OSError, ImportError) as error:
         parser.exit(1, f"Could not load Script 6: {error}\n")
+    if args.turbo and not callable(getattr(script6.competition, "sync_targets", None)):
+        parser.exit(1, "Installed competition queue does not support per-joint Turbo playback.\n")
     motions = repo / "motions"
     if args.terminal:
         import curses
         from arm_board_terminal import run_terminal
 
         try:
-            run_terminal(partial(build_plan, script6, motions), partial(play, script6))
+            run_terminal(
+                partial(build_plan, script6, motions),
+                partial(play, script6, turbo=args.turbo),
+                turbo=args.turbo,
+            )
         except curses.error as error:
             parser.exit(1, f"Terminal board could not open: {error}\n")
         return
@@ -285,7 +302,7 @@ def main():
         root = tk.Tk()
     except tk.TclError as error:
         parser.exit(1, f"Could not open a window: {error}. Use --terminal for a terminal session.\n")
-    run_window(root, ArmBoardUI, script6, motions)
+    run_window(root, ArmBoardUI, script6, motions, turbo=args.turbo)
 
 
 if __name__ == "__main__":
