@@ -321,7 +321,7 @@ def record():
             bookmark_menu(path, data)
             continue
         # Quick link: @safe_left appends; 2@safe_left replaces waypoint 2.
-        inline = re.fullmatch(r'([1-9]\\d*)?@([a-z][a-z0-9_-]{0,47})', choice)
+        inline = re.fullmatch(r'([1-9]\d*)?@([a-z][a-z0-9_-]{0,47})', choice)
         if inline:
             target_index = int(inline.group(1)) - 1 if inline.group(1) else len(data['points'])
             name = inline.group(2)
