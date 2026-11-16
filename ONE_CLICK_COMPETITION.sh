@@ -100,6 +100,7 @@ scripts=(
     pose_bookmarks.py
     competition_queue.py
     playback_speed.py
+    pose_bookmarks.py
     raw_playback_validation.py
     raw_capture_conversion.py
     validated_raw_save.py
