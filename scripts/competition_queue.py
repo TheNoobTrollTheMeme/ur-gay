@@ -182,7 +182,7 @@ def build_catalog(routes, load_sequence, validate_target, *,
 # Legacy description text is informational, not a live motion validation result.
 # Locally re-taught waypoints may retain an outdated imported description.
 
-def build_motion_catalog(routes, load_sequence, validate_target, *, report=print):
+def build_motion_catalog(routes, load_sequence, validate_target, *, report=print, bookmarks=None):
     """Discover all saved waypoint files, with stable IDs and named aliases.
 
     A recording with bad points is unavailable, not fatal for all other motions.
@@ -237,6 +237,27 @@ def build_motion_catalog(routes, load_sequence, validate_target, *, report=print
         catalog[identifier] = catalog[move_id] + catalog[place_id]
         labels[identifier] = base
         aliases[base] = identifier
+    # Reusable named single-pose bookmarks are also legal queue entries.
+    # Keep their names separate from saved multi-point routes and numeric IDs.
+    # This is a snapshot taken at queue creation, not an in-motion retarget.
+    for name, pose in sorted((bookmarks or {}).items()):
+        alias = '@' + str(name).strip().lower()
+        if not re.fullmatch(r'@[a-z][a-z0-9_-]{0,47}', alias):
+            report(f'DISABLED bookmark {alias!r}: invalid name')
+            continue
+        try:
+            validate_target(pose)
+        except (ValueError, RuntimeError, KeyError, TypeError) as error:
+            report(f'DISABLED bookmark {alias}: {error}')
+            continue
+        if alias in aliases:
+            report(f'DISABLED bookmark {alias}: conflicting alias')
+            continue
+        identifier = str(next_id)
+        next_id += 1
+        catalog[identifier] = (Point(alias, 1, dict(pose)),)
+        labels[identifier] = alias
+        aliases[alias] = identifier
     return catalog, labels, aliases
 
 
@@ -530,13 +551,13 @@ def playback(catalog, plan, profile, *, connect, read_all, enable_all_torque,
 
 def menu(routes, load_sequence, validate_target, *, connect, read_all,
          enable_all_torque, disable_all_torque, terminal_class,
-         settings, check_result, report=print):
+         settings, check_result, report=print, bookmarks=None):
     """Queue ANY saved validated motion by name or ID, before or during motion."""
-    if not routes:
-        report('No saved waypoint sequences found.')
+    if not routes and not bookmarks:
+        report('No saved waypoint sequences or bookmarks found.')
         return
     catalog, labels, aliases = build_motion_catalog(
-        routes, load_sequence, validate_target, report=report)
+        routes, load_sequence, validate_target, report=report, bookmarks=bookmarks)
     if not catalog:
         report('No valid saved waypoint motions. Repair recordings in script 6 menu 1.')
         return
@@ -544,11 +565,14 @@ def menu(routes, load_sequence, validate_target, *, connect, read_all,
     for identifier in sorted(catalog, key=int):
         report(f'{identifier}: {labels[identifier]} '
                f'({len(catalog[identifier])} points) [READY]')
-    report('Use saved names (grab1, c1r1a, custom) or the listed IDs.')
+    report('Use saved names (grab1, c1r1a, custom), @ttl, or the listed IDs.')
     report('Square macros (e.g. c1r1) include its m and p sequences.')
+    if bookmarks:
+        report('WARNING: @bookmarks command ONE pose, not a collision-free transition.')
+        report('Clear the entire route before executing a bookmark.')
     report('Only READY names/IDs can run. Collision clearance is NOT verified.')
 
-    raw = input('Initial queue (e.g. grab1 c1r1a grab2; blank=empty; Q=cancel): ').strip().lower()
+    raw = input('Initial queue (e.g. grab1 @ttl grab2; blank=empty; Q=cancel): ').strip().lower()
     if raw == 'q':
         return
     plan = QueuePlan(catalog, raw.split(), aliases=aliases, labels=labels)
