@@ -108,6 +108,41 @@ def save_bookmark(path, name, pose, joint_names, *, overwrite=False):
     return _atomic_save(path, data)
 
 
+
+def edit_bookmark_reference(data, name, position=None, *, insert=False):
+    """Return a new sequence with a reusable bookmark link.
+
+    No hardware access and no mutation of the input sequence. position is
+    1-based. No position appends; +N inserts before N; N replaces point N.
+    Explicit N=len+1 also appends for compatibility with Script 6 shortcuts.
+    """
+    name = normalize_name(name)
+    if not isinstance(data, dict) or not isinstance(data.get('points'), list):
+        raise ValueError('Expected a pose sequence with a waypoint list.')
+    points = list(data['points'])
+    if position is None:
+        index = len(points)
+        action = 'Appended'
+    else:
+        if type(position) is not int:
+            raise ValueError('Waypoint number must be an integer.')
+        index = position - 1
+        if insert:
+            if not 0 <= index <= len(points):
+                raise ValueError('Insert position must be 1..number of waypoints + 1.')
+            action = 'Inserted'
+        else:
+            if not 0 <= index <= len(points):
+                raise ValueError('Replace position must be an existing waypoint number.')
+            action = 'Appended' if index == len(points) else 'Replaced'
+    link = {'bookmark': name}
+    if insert or index == len(points):
+        points.insert(index, link)
+    else:
+        points[index] = link
+    return dict(data, points=points), index + 1, action
+
+
 def referenced_by(motion_dir, name):
     """Find recordings referring to a bookmark before allowing deletion."""
     name = normalize_name(name)
