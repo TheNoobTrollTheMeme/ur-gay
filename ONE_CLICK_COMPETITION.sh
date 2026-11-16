@@ -97,6 +97,7 @@ fi
 # Deploy only the linked launcher/playback dependencies; never modify motions/*.json.
 scripts=(
     06_live_grid_tool.py
+    pose_bookmarks.py
     competition_queue.py
     playback_speed.py
     raw_playback_validation.py

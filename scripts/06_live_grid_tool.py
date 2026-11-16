@@ -23,10 +23,24 @@ from playback_speed import (DEFAULT_SPEED, DEFAULT_ACCELERATION,
 from raw_capture_conversion import convert_recording_to_raw
 from raw_playback_validation import validate_raw_pose
 from validated_raw_save import save_raw_recording, validate_raw_recording
+from pose_bookmarks import (
+    normalize_name, save_bookmark, list_bookmarks, get_bookmark,
+    delete_bookmark, resolve_points, load_with_bookmarks, save_linked_sequence,
+)
 
 spec = importlib.util.spec_from_file_location('waypoints', ROOT / 'scripts/05_waypoint_sequence.py')
 wp = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wp)
+BOOKMARK_FILE = ROOT / 'motions' / '_pose_bookmarks.json'
+_original_load_sequence = wp.load_sequence
+
+def _load_sequence_with_bookmarks(path):
+    return load_with_bookmarks(
+        path, _original_load_sequence, wp.parse_point_values,
+        settings.JOINT_NAMES, BOOKMARK_FILE)
+
+# Script 6 resolves linked poses transparently; the original Kelvin file is unchanged.
+wp.load_sequence = _load_sequence_with_bookmarks
 STOP_KEYS = {' ', 'q', '\x03', '\x1b'}
 
 
@@ -44,7 +58,12 @@ def commit(path, data):
     The old angle-based path is unchanged. Raw files still require complete,
     in-range integer ticks, and old recordings are backed up before writing.
     """
-    if data.get('input_type') == 'raw':
+    if any(isinstance(point, dict) and 'bookmark' in point for point in data.get('points', [])):
+        backup = save_linked_sequence(
+            path, data, wp.parse_point_values, settings.JOINT_NAMES, BOOKMARK_FILE)
+        if backup is not None:
+            print(f'Backup: {backup.name}')
+    elif data.get('input_type') == 'raw':
         backup = save_raw_recording(path, data, settings.JOINT_NAMES)
         if backup is not None:
             print(f'Backup: {backup.name}')
@@ -108,10 +127,151 @@ def remove_waypoint(path, data):
     print(f'Removed waypoint {index + 1}. {len(data["points"])} remain; following points are renumbered.')
 
 
+
+def _bookmark_choice():
+    name = input('Bookmark name (e.g. safe_left): ').strip().lstrip('@')
+    name = normalize_name(name)
+    if name not in list_bookmarks(BOOKMARK_FILE, settings.JOINT_NAMES):
+        raise ValueError(f'Unknown bookmark @{name}. Capture or save it first.')
+    return name
+
+
+def _bookmark_replace_confirm(name):
+    existing = list_bookmarks(BOOKMARK_FILE, settings.JOINT_NAMES)
+    if name not in existing:
+        return False
+    return input(f'@{name} exists. Update its pose for ALL linked routes? [y/N]: ').strip().lower() in ('y', 'yes')
+
+
+def go_to_bookmark(name):
+    """Explicit single-pose move with the existing playback checks and stop keys."""
+    pose = get_bookmark(BOOKMARK_FILE, name, settings.JOINT_NAMES)
+    validate_target(pose)
+    print('Single-pose move: this does NOT plan a collision-free route.')
+    print('Clear the full travel path and support any carried block.')
+    if input('Type MOVE to travel directly to this bookmark (else cancel): ').strip() != 'MOVE':
+        print('Cancelled; no motor motion.')
+        return
+    port, handler = connect()
+    completed = False
+    try:
+        with RawTerminal() as terminal:
+            measured = read_all(handler)
+            move_all_sync(handler, measured, speed=DEFAULT_SPEED,
+                          acceleration=DEFAULT_ACCELERATION)
+            if stopped(terminal):
+                return
+            enable_all_torque(handler)
+            if stopped(terminal):
+                return
+            move_for_playback(handler, pose, DEFAULT_SPEED, DEFAULT_ACCELERATION)
+            if not wait_move(handler, terminal):
+                return
+            completed = True
+        print('Bookmark reached. Torque remains ON; support the arm.')
+    finally:
+        try:
+            if not completed:
+                print('STOP: releasing torque; support arm and blocks.')
+                disable_all_torque(handler)
+        finally:
+            port.closePort()
+
+
+def bookmark_menu(path=None, data=None):
+    """One captured pose, reused as an editable live reference in any motion."""
+    while True:
+        saved = list_bookmarks(BOOKMARK_FILE, settings.JOINT_NAMES)
+        print('\nBOOKMARKS: ' + (', '.join('@' + name for name in saved) or '(none)'))
+        print('C Capture current arm pose | G Move to a bookmark | D Delete unused bookmark')
+        if path is not None:
+            print('S Save a waypoint as bookmark | I Insert @bookmark | R Replace with @bookmark')
+        answer = input('Bookmark command, L list, Q back: ').strip().lower()
+        if answer == 'q':
+            return
+        try:
+            if answer == 'l':
+                for name, pose in saved.items():
+                    print(f'@{name}: ' + ' '.join(str(pose[j]) for j in settings.JOINT_NAMES))
+            elif answer == 'c':
+                name = normalize_name(input('Name this single pose: ').strip())
+                exists = name in saved
+                if exists and not _bookmark_replace_confirm(name):
+                    print('Cancelled; existing bookmark unchanged.')
+                    continue
+                pose = capture()
+                if pose is None:
+                    print('Capture cancelled.')
+                    continue
+                backup = save_bookmark(BOOKMARK_FILE, name, pose,
+                                       settings.JOINT_NAMES, overwrite=exists)
+                print(f'Saved @{name} (one five-servo pose).' +
+                      (f' Backup: {backup.name}' if backup else ''))
+            elif answer == 's' and path is not None:
+                points = resolve_points(data, wp.parse_point_values,
+                                        settings.JOINT_NAMES, BOOKMARK_FILE)
+                if not points:
+                    raise ValueError('This route has no recorded waypoints yet.')
+                position = int(input(f'Save which waypoint? [1..{len(points)}]: '))
+                if not 1 <= position <= len(points):
+                    raise ValueError('Waypoint number out of range.')
+                name = normalize_name(input('Bookmark name: ').strip())
+                exists = name in saved
+                if exists and not _bookmark_replace_confirm(name):
+                    print('Cancelled; bookmark unchanged.')
+                    continue
+                save_bookmark(BOOKMARK_FILE, name, points[position - 1],
+                              settings.JOINT_NAMES, overwrite=exists)
+                print(f'Saved waypoint {position} as @{name}.')
+                if input(f'Link {path.stem} waypoint {position} to @{name}? [Y/n]: ').strip().lower() in ('', 'y', 'yes'):
+                    edited = dict(data, points=list(data['points']))
+                    edited['points'][position - 1] = {'bookmark': name}
+                    commit(path, edited)
+                    data['points'] = edited['points']
+                    print(f'Linked waypoint {position} to @{name}.')
+            elif answer in ('i', 'r') and path is not None:
+                name = _bookmark_choice()
+                if answer == 'i':
+                    position = int(input(f'Insert BEFORE waypoint number [1..{len(data["points"]) + 1}]: '))
+                    if not 1 <= position <= len(data['points']) + 1:
+                        raise ValueError('Insertion position out of range.')
+                    points = list(data['points'])
+                    points.insert(position - 1, {'bookmark': name})
+                    verb = 'Inserted'
+                else:
+                    if not data['points']:
+                        raise ValueError('No waypoints to replace. Use I to insert.')
+                    position = int(input(f'Replace waypoint number [1..{len(data["points"])}]: '))
+                    if not 1 <= position <= len(data['points']):
+                        raise ValueError('Waypoint number out of range.')
+                    points = list(data['points'])
+                    points[position - 1] = {'bookmark': name}
+                    verb = 'Replaced'
+                edited = dict(data, points=points)
+                commit(path, edited)
+                data['points'] = points
+                print(f'{verb} {path.stem} waypoint {position} with linked @{name}.')
+            elif answer == 'g':
+                go_to_bookmark(_bookmark_choice())
+            elif answer == 'd':
+                name = _bookmark_choice()
+                if input(f'Delete @{name}? (Linked routes are protected.) [y/N]: ').strip().lower() not in ('y', 'yes'):
+                    continue
+                delete_bookmark(BOOKMARK_FILE, name, settings.JOINT_NAMES)
+                print(f'Deleted unused bookmark @{name}.')
+            else:
+                print('Unknown bookmark command (or open a sequence for S/I/R).')
+        except (ValueError, TypeError, OSError, RuntimeError, TimeoutError) as error:
+            print(f'Bookmark error: {error}')
+
+
 def record():
     routes = choose()
-    answer = input('Sequence number to edit, N for new, Q to return: ').strip().lower()
+    answer = input('Sequence number to edit, N new, B bookmarks, Q return: ').strip().lower()
     if answer == 'q':
+        return
+    if answer == 'b':
+        bookmark_menu()
         return
     if answer == 'n':
         name = input('New name (e.g. cell_A1): ').strip()
@@ -141,16 +301,44 @@ def record():
             if response:
                 raise ValueError('Press Enter to convert or Q to cancel.')
             _, decoded = wp.load_sequence(path)
+            original_points = list(data['points'])
             data = convert_recording_to_raw(
                 data, decoded, settings.JOINT_NAMES)
+            # Keep references linked if an old angle-format file gets converted.
+            for point_index, original in enumerate(original_points):
+                if isinstance(original, dict) and 'bookmark' in original:
+                    data['points'][point_index] = {'bookmark': original['bookmark']}
             print('RAW conversion staged. Original untouched until save; '
                   'first save creates a timestamped backup.')
     while True:
         for i, point in enumerate(data['points'], 1):
-            print(f'{i}: {point.get("input_values", point.get("positions_raw"))}')
-        choice = input('Waypoint number to REPLACE, A to append, D to remove, Q to finish: ').strip().lower()
+            print(f'{i}: @{point["bookmark"]}' if 'bookmark' in point else
+                  f'{i}: {point.get("input_values", point.get("positions_raw"))}')
+        choice = input('Waypoint # replace, A append, @name append link, 2@name replace, B bookmarks, D remove, Q finish: ').strip().lower()
         if choice == 'q':
             return
+        if choice == 'b':
+            bookmark_menu(path, data)
+            continue
+        # Quick link: @safe_left appends; 2@safe_left replaces waypoint 2.
+        inline = re.fullmatch(r'([1-9]\d*)?@([a-z][a-z0-9_-]{0,47})', choice)
+        if inline:
+            target_index = int(inline.group(1)) - 1 if inline.group(1) else len(data['points'])
+            name = inline.group(2)
+            get_bookmark(BOOKMARK_FILE, name, settings.JOINT_NAMES)
+            if not 0 <= target_index <= len(data['points']):
+                print('No such waypoint')
+                continue
+            points = list(data['points'])
+            if target_index == len(points):
+                points.append({'bookmark': name})
+            else:
+                points[target_index] = {'bookmark': name}
+            updated = dict(data, points=points)
+            commit(path, updated)
+            data['points'] = points
+            print(f'Linked waypoint {target_index + 1} to @{name}.')
+            continue
         if choice == 'd':
             remove_waypoint(path, data)
             continue
@@ -181,6 +369,7 @@ def record():
             wp.parse_point_values(values, data['input_type'])
         point = dict(data['points'][index]) if index < len(data['points']) else {}
         point.pop('positions_raw', None)
+        point.pop('bookmark', None)
         point['input_values'] = values
         if index == len(data['points']):
             data['points'].append(point)
