@@ -113,6 +113,23 @@ class HardwareChecks(unittest.TestCase):
         self.assertEqual([c[2:] for c in motor.commands], [(1200,60)]*4+[(300,20)])
         self.assertEqual(motor.packets, 1)
 
+    def test_custom_speed_applies_to_all_arm_joints_not_gripper(self):
+        motor = Motor()
+        cq.sync_targets(motor, SETTINGS, lambda *_: None,
+                        pt("m", 1).target, (225, 12))
+        self.assertEqual([c[2:] for c in motor.commands],
+                         [(225, 12)] * 4 + [(300, 20)])
+        self.assertEqual(motor.packets, 1)
+
+    def test_custom_out_of_bounds_cannot_send_commands(self):
+        motor = Motor()
+        for invalid in ((0, 10), (1250, 20), (200, 0), (200, 100), ("200", 10)):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                cq.sync_targets(motor, SETTINGS, lambda *_: None,
+                                pt("m", 1).target, invalid)
+        self.assertEqual(motor.commands, [])
+        self.assertEqual(motor.packets, 0)
+
     def test_explicit_fast_gripper_profile_is_independent(self):
         motor = Motor()
         cq.sync_targets(motor, SETTINGS, lambda *_: None,
