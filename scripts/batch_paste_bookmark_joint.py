@@ -106,10 +106,20 @@ def parse_targets(arguments):
 
 
 def _parse_raw(values, input_type, joint_names):
+    """Kelvin recordings may store raw ticks as decimal STRINGS, not integers."""
     joints = tuple(joint_names)
     if input_type != "raw" or not isinstance(values, list) or len(values) != len(joints):
         raise ValueError(f"Expected {len(joints)} RAW servo tick values.")
-    return dict(zip(joints, values))
+    parsed = {}
+    for joint, value in zip(joints, values):
+        if type(value) is int:
+            tick = value
+        elif isinstance(value, str) and re.fullmatch(r"[+-]?\d+", value.strip()):
+            tick = int(value.strip())
+        else:
+            raise ValueError(f"{joint}: invalid raw tick {value!r}")
+        parsed[joint] = tick
+    return parsed
 
 
 def prepare_batch(motions, bookmark, joint, selections, joint_names):
