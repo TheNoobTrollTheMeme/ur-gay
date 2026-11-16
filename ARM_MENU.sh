@@ -18,6 +18,7 @@ Usage: arm [command] [arguments]
        arm attack          full live square attack selector
        arm joycon          Joy-Con diagnostics (no movement)
        arm edit            jump straight into Script 6 recording editor
+       arm paste            batch-paste ONE bookmark joint into chosen waypoints
        arm bookmark        bookmark manager (capture, list, delete)
        arm goto NAME       move to a saved bookmark, with MOVE confirmation
        arm saved NAME      play saved sequence or @bookmark (asks before motion)
@@ -195,6 +196,7 @@ dispatch() {
         a|attack) run_script scripts/06_full_live_attack.py "$@" ;;
         j|joycon|joy) run_script scripts/smash_joycon.py --diagnose ;;
         e|edit|record) run_script6_function record ;;
+        x|paste|batch|jointpaste) run_script scripts/batch_paste_bookmark_joint.py "$@" ;;
         p|bookmark|bookmarks|point|points) run_script6_function bookmark_menu ;;
         g|goto|go) run_goto "$@" ;;
         s|saved|play) run_saved no "$@" ;;
@@ -219,6 +221,7 @@ menu() {
   5  Waypoint record & playback   M  Tray / winning line remap
                                   A  Full live square attack
                                   E  Edit recorded waypoints
+                                  X  Batch-paste bookmark coordinate
                                   P  Bookmark manager (capture/list)
                                   G  Go to named bookmark
                                   S  Play saved motion by name
