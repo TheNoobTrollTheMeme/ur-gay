@@ -14,6 +14,8 @@ import re
 import sys
 from tempfile import TemporaryDirectory
 from threading import Event, Thread
+from playback_speed import (DEFAULT_SPEED, DEFAULT_ACCELERATION,
+                            validate_playback_settings)
 
 
 WINNING_LINES = {
@@ -272,7 +274,11 @@ class StopInput:
         return " " if self.requested.wait(timeout) else None
 
 
-def play(script6, plan, requested, log, *, turbo=False):
+def play(script6, plan, requested, log, *, turbo=False,
+         speed=DEFAULT_SPEED, acceleration=DEFAULT_ACCELERATION):
+    speed, acceleration = validate_playback_settings(speed, acceleration)
+    if turbo and (speed, acceleration) != (DEFAULT_SPEED, DEFAULT_ACCELERATION):
+        raise ValueError("Choose either --turbo or custom --speed/--acceleration.")
     if requested.is_set():
         return False
     port, handler = script6.connect()
@@ -304,8 +310,15 @@ def play(script6, plan, requested, log, *, turbo=False):
                 script6.competition.sync_targets(
                     handler, script6.settings, script6.check_result, waypoint.positions, "turbo",
                 )
+            elif (speed, acceleration) != (DEFAULT_SPEED, DEFAULT_ACCELERATION):
+                # Custom speed is applied to arm joints; keep the gripper at normal 300/20.
+                script6.competition.sync_targets(
+                    handler, script6.settings, script6.check_result, waypoint.positions,
+                    (speed, acceleration),
+                )
             else:
-                script6.move_all_sync(handler, waypoint.positions, speed=300, acceleration=20)
+                script6.move_all_sync(handler, waypoint.positions,
+                                      speed=DEFAULT_SPEED, acceleration=DEFAULT_ACCELERATION)
             if not script6.wait_move(handler, stop):
                 return False
         completed = not requested.is_set()
@@ -318,7 +331,8 @@ def play(script6, plan, requested, log, *, turbo=False):
             port.closePort()
 
 
-def run_window(root, ui_class, script6, motions, *, turbo=False):
+def run_window(root, ui_class, script6, motions, *, turbo=False,
+               speed=DEFAULT_SPEED, acceleration=DEFAULT_ACCELERATION):
     from tkinter import messagebox
 
     events = Queue()
@@ -327,7 +341,8 @@ def run_window(root, ui_class, script6, motions, *, turbo=False):
 
     def worker(plan):
         try:
-            completed = play(script6, plan, stop, lambda line: events.put(("log", line)), turbo=turbo)
+            completed = play(script6, plan, stop, lambda line: events.put(("log", line)),
+                             turbo=turbo, speed=speed, acceleration=acceleration)
         except Exception as error:
             events.put(("done", f"Run failed · {error}"))
         else:
@@ -397,6 +412,8 @@ def run_window(root, ui_class, script6, motions, *, turbo=False):
     ui = ui_class(root, square, request_stop, close)
     if turbo:
         root.title("Arm Board · Turbo")
+    elif (speed, acceleration) != (DEFAULT_SPEED, DEFAULT_ACCELERATION):
+        root.title(f"Arm Board · playback {speed}/{acceleration}")
     root.after(40, poll)
     root.mainloop()
 
@@ -406,7 +423,18 @@ def main():
     parser.add_argument("--repo", type=Path, help="Path to the arm repo")
     parser.add_argument("--terminal", action="store_true", help="Use the keyboard-operated terminal board")
     parser.add_argument("--turbo", action="store_true", help="Use the Competition Turbo profile with normal gripper speed")
+    parser.add_argument("--speed", type=int, help="Custom arm speed 50..1200 (default 300)")
+    parser.add_argument("--acceleration", type=int, help="Custom arm acceleration 1..60 (default 20)")
     args = parser.parse_args()
+    if args.turbo and (args.speed is not None or args.acceleration is not None):
+        parser.error("Use either --turbo or --speed/--acceleration, not both.")
+    try:
+        speed, acceleration = validate_playback_settings(
+            args.speed if args.speed is not None else DEFAULT_SPEED,
+            args.acceleration if args.acceleration is not None else DEFAULT_ACCELERATION,
+        )
+    except ValueError as error:
+        parser.error(str(error))
     if args.repo:
         repo = args.repo.expanduser().resolve()
     else:
@@ -427,12 +455,15 @@ def main():
         try:
             run_terminal(
                 partial(build_plan, script6, motions),
-                partial(play, script6, turbo=args.turbo),
+                partial(play, script6, turbo=args.turbo,
+                        speed=speed, acceleration=acceleration),
                 compose_queue=compose_queue,
                 export_winning_line=partial(export_winning_line, script6, motions),
                 sync_winning_lines=partial(sync_winning_lines, script6, motions),
                 link_winning_line=partial(link_winning_line, script6, motions),
                 turbo=args.turbo,
+                speed_label=(f"{speed}/{acceleration}" if (speed, acceleration)
+                             != (DEFAULT_SPEED, DEFAULT_ACCELERATION) else None),
             )
         except curses.error as error:
             parser.exit(1, f"Terminal board could not open: {error}\n")
@@ -446,7 +477,8 @@ def main():
         root = tk.Tk()
     except tk.TclError as error:
         parser.exit(1, f"Could not open a window: {error}. Use --terminal for a terminal session.\n")
-    run_window(root, ArmBoardUI, script6, motions, turbo=args.turbo)
+    run_window(root, ArmBoardUI, script6, motions, turbo=args.turbo,
+               speed=speed, acceleration=acceleration)
 
 
 if __name__ == "__main__":
