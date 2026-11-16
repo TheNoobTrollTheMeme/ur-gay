@@ -1,0 +1,21 @@
+name: Script 6 bookmark tests
+
+on:
+  push:
+    branches:
+      - feature/script6-single-pose-bookmarks
+      - main
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate Python source syntax
+        run: python -m compileall -q scripts tests
+      - name: Test saved single poses and linked waypoints
+        run: python -m unittest discover -s tests -p "test_pose_bookmarks.py" -v
