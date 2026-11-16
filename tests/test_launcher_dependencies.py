@@ -15,7 +15,7 @@ class DeploymentManifestChecks(unittest.TestCase):
         shell = INSTALLER.read_text()
         match = re.search(r"^scripts=\(\n(.*?)^\)", shell, re.M | re.S)
         self.assertIsNotNone(match, "Installer deployment list not found")
-        included = set(re.findall(r"^\s+([A-Za-z_][A-Za-z0-9_]*\.py)\s*$",
+        included = set(re.findall(r"^\s+([A-Za-z0-9_]+\.py)\s*$",
                                   match.group(1), re.M))
         self.assertIn("06_live_grid_tool.py", included)
         self.assertIn("arm_board.py", included)
