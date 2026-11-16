@@ -11,11 +11,13 @@ import os
 from pathlib import Path
 from queue import Empty, Queue
 import re
+import shutil
 import sys
 from tempfile import TemporaryDirectory
 from threading import Event, Thread
 from playback_speed import (DEFAULT_SPEED, DEFAULT_ACCELERATION,
                             validate_playback_settings)
+from tray_mapping import load_mapping, get_slot
 
 
 WINNING_LINES = {
@@ -61,18 +63,34 @@ def load_script6(repo):
     return module
 
 
-def pickup_for(col, row, mode, selected):
-    if selected is not None and selected not in range(1, 7):
-        raise ValueError("Pick a tray slot from 1 to 6.")
+def pickup_for(col, row, mode, selected, tray_mapping=None):
+    """Resolve a physical tray slot, not a hardcoded grabN filename."""
+    if tray_mapping is None:
+        from tray_mapping import default_mapping
+        tray_mapping = default_mapping()
+    if selected is not None:
+        entry = get_slot(tray_mapping, selected)
+        if entry["block"] == "empty":
+            raise ValueError(f"Tray slot {selected} is empty.")
     if mode == "place":
         return selected
     if mode != "attack":
         raise ValueError(f"Unknown mode: {mode}")
     if (col, row) == (2, 2):
-        if selected in (3, 6):
-            raise ValueError("For center attack, select a cube or cylinder, or clear the tray selection if one is already held.")
+        if selected is not None and get_slot(tray_mapping, selected)["block"] == "trophy":
+            raise ValueError("Center attack needs a cube/cylinder (not trophy), or a held block.")
         return selected
-    return 3 if col <= 2 else 6
+    if selected is not None:
+        return selected
+    # Preserve legacy behavior when the default trophy slots still match.
+    preferred = 3 if col <= 2 else 6
+    if get_slot(tray_mapping, preferred)["block"] == "trophy":
+        return preferred
+    trophies = [entry["slot"] for entry in tray_mapping["slots"]
+                if entry["block"] == "trophy"]
+    if len(trophies) == 1:
+        return trophies[0]
+    raise ValueError("Attack trophy position changed: select its slot with G first.")
 
 
 def read_route(script6, folder, stem):
@@ -102,10 +120,12 @@ def build_plan(script6, folder, col, row, mode, selected=None):
     if col not in (1, 2, 3) or row not in (1, 2, 3):
         raise ValueError("Choose a cell on the 3×3 board.")
     cell = f"c{col}r{row}"
-    pickup = pickup_for(col, row, mode, selected)
+    tray_mapping = load_mapping(folder)
+    pickup = pickup_for(col, row, mode, selected, tray_mapping)
     move = read_route(script6, folder, f"{cell}m")
     place = read_route(script6, folder, f"{cell}p")
-    grab = read_route(script6, folder, f"grab{pickup}") if pickup else ()
+    grab_name = get_slot(tray_mapping, pickup)["grab"] if pickup else None
+    grab = read_route(script6, folder, grab_name) if grab_name else ()
     for waypoint in (*grab, *move, *place):
         validate_waypoint(script6, waypoint)
 
@@ -127,7 +147,7 @@ def build_plan(script6, folder, col, row, mode, selected=None):
         approach = move
         phases = (f"{cell}m", f"{cell}p")
     if pickup:
-        phases = (f"grab{pickup}", *phases)
+        phases = (grab_name, *phases)
     for waypoint in approach:
         validate_waypoint(script6, waypoint)
     return Plan(cell.upper(), mode, pickup, phases, (*grab, *approach, *place))
@@ -227,6 +247,11 @@ def refresh_winning_line(script6, path, cells, original, data, recipe):
         script6.wp.save_sequence(temporary, updated)
         if path.read_bytes() != original:
             raise ValueError("Saved line changed during sync. Try again.")
+        backup_folder = path.parent / ".winning-line-backups"
+        backup_folder.mkdir(exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        backup = backup_folder / f"{path.name}.{stamp}.bak"
+        shutil.copy2(path, backup)
         temporary.replace(path)
     return True
 
@@ -422,12 +447,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, help="Path to the arm repo")
     parser.add_argument("--terminal", action="store_true", help="Use the keyboard-operated terminal board")
+    parser.add_argument("--remap", action="store_true",
+                        help="Edit tray layout and winning-line pickups OFFLINE (no motor motion)")
     parser.add_argument("--turbo", action="store_true", help="Use the Competition Turbo profile with normal gripper speed")
     parser.add_argument("--speed", type=int, help="Custom arm speed 50..1200 (default 300)")
     parser.add_argument("--acceleration", type=int, help="Custom arm acceleration 1..60 (default 20)")
     args = parser.parse_args()
     if args.turbo and (args.speed is not None or args.acceleration is not None):
         parser.error("Use either --turbo or --speed/--acceleration, not both.")
+    if args.remap and (args.terminal or args.turbo or args.speed is not None or
+                       args.acceleration is not None):
+        parser.error("--remap is offline-only; do not combine with playback options.")
     try:
         speed, acceleration = validate_playback_settings(
             args.speed if args.speed is not None else DEFAULT_SPEED,
@@ -448,6 +478,10 @@ def main():
     if args.turbo and not callable(getattr(script6.competition, "sync_targets", None)):
         parser.exit(1, "Installed competition queue does not support per-joint Turbo playback.\n")
     motions = repo / "motions"
+    if args.remap:
+        from tray_remap import run_editor
+        run_editor(script6, motions, board=sys.modules[__name__])
+        return
     if args.terminal:
         import curses
         from arm_board_terminal import run_terminal
@@ -464,6 +498,7 @@ def main():
                 turbo=args.turbo,
                 speed_label=(f"{speed}/{acceleration}" if (speed, acceleration)
                              != (DEFAULT_SPEED, DEFAULT_ACCELERATION) else None),
+                tray_slots=load_mapping(motions)["slots"],
             )
         except curses.error as error:
             parser.exit(1, f"Terminal board could not open: {error}\n")
