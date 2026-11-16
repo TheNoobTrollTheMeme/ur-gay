@@ -74,18 +74,8 @@ def read_route(script6, folder, stem):
 
 
 def validate_waypoint(script6, waypoint):
-    if waypoint.positions.keys() != set(script6.settings.JOINT_NAMES):
-        raise ValueError(f"{waypoint.route} #{waypoint.number}: joint names do not match the arm settings.")
-    if any(type(tick) is not int or not 0 <= tick <= 4095 for tick in waypoint.positions.values()):
-        raise ValueError(f"{waypoint.route} #{waypoint.number}: invalid raw servo tick.")
-    validate = script6.validate_target
-    if (waypoint.route, waypoint.number, waypoint.positions.get("shoulder")) in {
-        ("grab1", 1, 3160),
-        ("grab2", 1, 3162),
-    }:
-        validate = script6.validate_competition_target
     try:
-        validate(waypoint.positions)
+        script6.validate_competition_target(waypoint.positions)
     except (KeyError, ValueError) as error:
         raise ValueError(f"{waypoint.route} #{waypoint.number}: {error}") from error
 
