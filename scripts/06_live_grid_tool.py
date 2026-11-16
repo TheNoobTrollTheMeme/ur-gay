@@ -21,6 +21,7 @@ import competition_queue as competition
 from playback_speed import (DEFAULT_SPEED, DEFAULT_ACCELERATION,
                             prompt_playback_settings, validate_playback_settings)
 from raw_capture_conversion import convert_recording_to_raw
+from raw_playback_validation import validate_raw_pose
 from validated_raw_save import save_raw_recording, validate_raw_recording
 
 spec = importlib.util.spec_from_file_location('waypoints', ROOT / 'scripts/05_waypoint_sequence.py')
@@ -225,7 +226,7 @@ def sync_attack(path):
                 points=[dict(input_values=[point[j] for j in settings.JOINT_NAMES])
                         for point in (m[0], m[1], p[1])])
     for point in (m[0], m[1], p[1]):
-        validate_target(point)
+        validate_competition_target(point)
     try:
         old = json.loads(target_path.read_text())
     except (OSError, json.JSONDecodeError):
@@ -265,27 +266,14 @@ def validate_target(positions):
 
 
 def validate_competition_target(positions):
-    """Trust manually verified shoulder ticks in Competition Mode only.
+    """Validate raw register data for competition playback.
 
-    Bypass the app-specific shoulder angle conversion, NOT servo register range.
-    Preserve all other configured angle limits and normal-playback validation.
-    This does not validate physical clearance or remove motor firmware limits.
+    A saved raw waypoint is not reinterpreted through legacy ANGLE_LIMITS,
+    which may not match the actual joint calibration. Keep exact joint names,
+    integer servo range checks, movement timeouts and operator stop handling.
+    NOTE: This alone does NOT confirm physical joint clearance or safe travel.
     """
-    missing = set(settings.JOINT_NAMES) - set(positions)
-    extra = set(positions) - set(settings.JOINT_NAMES)
-    if missing or extra:
-        raise ValueError(f'Waypoint joint mismatch: missing={sorted(missing)}, extra={sorted(extra)}')
-    for joint in settings.JOINT_NAMES:
-        value = positions[joint]
-        if type(value) is not int or not 0 <= value <= 4095:
-            raise ValueError(f'{joint}: invalid raw servo tick {value!r}; must be 0..4095')
-        if joint != 'shoulder':
-            angle = position_to_angle(joint, value)
-            lo, hi = settings.ANGLE_LIMITS[joint]
-            if not lo <= angle <= hi:
-                raise ValueError(
-                    f'{joint}: raw={value}, computed_angle={angle:.2f} deg, '
-                    f'allowed={lo}..{hi} deg; competition did not bypass this joint')
+    validate_raw_pose(positions, settings.JOINT_NAMES)
 
 
 def live_attack_targets(path):
