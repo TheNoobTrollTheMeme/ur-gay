@@ -2,6 +2,7 @@
 """Control the ENGG1101 board using recorded Script 6 motions."""
 import argparse
 from dataclasses import dataclass, replace
+from functools import partial
 import importlib.util
 from pathlib import Path
 from queue import Empty, Queue
@@ -253,6 +254,7 @@ def run_window(root, ui_class, script6, motions):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, help="Path to the arm repo")
+    parser.add_argument("--terminal", action="store_true", help="Use the keyboard-operated terminal board")
     args = parser.parse_args()
     if args.repo:
         repo = args.repo.expanduser().resolve()
@@ -264,6 +266,16 @@ def main():
         script6 = load_script6(repo)
     except (OSError, ImportError) as error:
         parser.exit(1, f"Could not load Script 6: {error}\n")
+    motions = repo / "motions"
+    if args.terminal:
+        import curses
+        from arm_board_terminal import run_terminal
+
+        try:
+            run_terminal(partial(build_plan, script6, motions), partial(play, script6))
+        except curses.error as error:
+            parser.exit(1, f"Terminal board could not open: {error}\n")
+        return
     try:
         import tkinter as tk
         from arm_board_ui import ArmBoardUI
@@ -272,8 +284,8 @@ def main():
     try:
         root = tk.Tk()
     except tk.TclError as error:
-        parser.exit(1, f"Could not open a window: {error}. Start from the Pi desktop or an X-forwarded session.\n")
-    run_window(root, ArmBoardUI, script6, repo / "motions")
+        parser.exit(1, f"Could not open a window: {error}. Use --terminal for a terminal session.\n")
+    run_window(root, ArmBoardUI, script6, motions)
 
 
 if __name__ == "__main__":
