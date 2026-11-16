@@ -53,7 +53,7 @@ def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activit
     line(12, "G tray   0 clear tray   B board/queue   L live/preview")
     line(13, "Space/Esc stop   Q quit")
     if mode == "queue":
-        line(14, "R run queue   Backspace undo   C clear queue")
+        line(14, "W export line   R run   Backspace undo   C clear")
     else:
         line(14, "A attack/place")
     if pending:
@@ -72,7 +72,7 @@ def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activit
     screen.refresh()
 
 
-def terminal_loop(screen, build_plan, play, compose_queue, turbo):
+def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, turbo):
     try:
         curses.curs_set(0)
     except curses.error:
@@ -187,6 +187,16 @@ def terminal_loop(screen, build_plan, play, compose_queue, turbo):
                 placements.clear()
                 status = "Queue cleared"
                 continue
+            if queueing and key in (ord("w"), ord("W")):
+                try:
+                    path = export_winning_line(tuple(placements))
+                except (OSError, ValueError, RuntimeError) as error:
+                    status = "Could not export winning line"
+                    activity.append(str(error))
+                else:
+                    status = "Winning line saved"
+                    activity.append(f"Saved {path.name} in motions/")
+                continue
             if queueing and key in (ord("r"), ord("R")):
                 if not placements:
                     status = "Queue is empty"
@@ -240,8 +250,8 @@ def terminal_loop(screen, build_plan, play, compose_queue, turbo):
             thread.join()
 
 
-def run_terminal(build_plan, play, *, compose_queue, turbo=False):
+def run_terminal(build_plan, play, *, compose_queue, export_winning_line, turbo=False):
     try:
-        curses.wrapper(terminal_loop, build_plan, play, compose_queue, turbo)
+        curses.wrapper(terminal_loop, build_plan, play, compose_queue, export_winning_line, turbo)
     except KeyboardInterrupt:
         pass

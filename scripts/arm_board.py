@@ -2,12 +2,25 @@
 """Control the ENGG1101 board using recorded Script 6 motions."""
 import argparse
 from dataclasses import dataclass, replace
+from datetime import datetime
 from functools import partial
 import importlib.util
+from itertools import count
+import os
 from pathlib import Path
 from queue import Empty, Queue
 import sys
+from tempfile import TemporaryDirectory
 from threading import Event, Thread
+
+
+WINNING_LINES = {
+    frozenset(line.split()) for line in (
+        "C1R1 C2R1 C3R1", "C1R2 C2R2 C3R2", "C1R3 C2R3 C3R3",
+        "C1R1 C1R2 C1R3", "C2R1 C2R2 C2R3", "C3R1 C3R2 C3R3",
+        "C1R1 C2R2 C3R3", "C3R1 C2R2 C1R3",
+    )
+}
 
 
 @dataclass(frozen=True)
@@ -127,6 +140,44 @@ def compose_queue(plans):
         phases=tuple(plan.cell for plan in plans),
         waypoints=tuple(waypoint for plan in plans for waypoint in plan.waypoints),
     )
+
+
+def export_winning_line(script6, folder, plans):
+    cells = tuple(plan.cell for plan in plans)
+    if len(cells) != 3 or frozenset(cells) not in WINNING_LINES:
+        raise ValueError("Queue three distinct squares in a row, column, or diagonal.")
+    plan = compose_queue(plans)
+    joints = script6.settings.JOINT_NAMES
+    base = "winning_line_" + "_".join(cell.lower() for cell in cells)
+    sequence = {
+        "schema_version": 1,
+        "type": "pose_sequence",
+        "name": base,
+        "description": "Winning line " + " > ".join(cells),
+        "input_type": "raw",
+        "created_at": datetime.now().astimezone().isoformat(),
+        "joint_order": [
+            {"joint": joint, "servo_id": script6.settings.SERVO_IDS[joint]} for joint in joints
+        ],
+        "points": [
+            {"input_values": [waypoint.positions[joint] for joint in joints]}
+            for waypoint in plan.waypoints
+        ],
+    }
+    with TemporaryDirectory(prefix=".winning-line-", dir=folder) as directory:
+        temporary = Path(directory) / "sequence.json"
+        for number in count(1):
+            name = base if number == 1 else f"{base}_{number}"
+            output = folder / f"{name}.json"
+            if output.exists():
+                continue
+            sequence["name"] = name
+            script6.wp.save_sequence(temporary, sequence)
+            try:
+                os.link(temporary, output)
+            except FileExistsError:
+                continue
+            return output
 
 
 class StopInput:
@@ -296,6 +347,7 @@ def main():
                 partial(build_plan, script6, motions),
                 partial(play, script6, turbo=args.turbo),
                 compose_queue=compose_queue,
+                export_winning_line=partial(export_winning_line, script6, motions),
                 turbo=args.turbo,
             )
         except curses.error as error:
