@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from pose_bookmarks import (
     save_bookmark, list_bookmarks, get_bookmark,
     resolve_points, save_linked_sequence, load_with_bookmarks,
-    delete_bookmark, referenced_by,
+    delete_bookmark, referenced_by, edit_bookmark_reference,
 )
 
 JOINTS = ('base_yaw', 'shoulder', 'elbow', 'wrist', 'gripper')
@@ -99,6 +99,43 @@ class BookmarkTests(unittest.TestCase):
                 route, base_loader, parse_values, JOINTS, library)
             self.assertEqual(poses, [POSE, POSE])
             self.assertEqual(calls, [route])
+
+    def test_editor_shortcuts_append_replace_and_insert_without_mutating_input(self):
+        original = sequence({'input_values': [1, 2, 3, 4, 5]},
+                            {'input_values': [6, 7, 8, 9, 10]})
+        appended, number, action = edit_bookmark_reference(original, 'safe', None)
+        self.assertEqual((number, action), (3, 'Appended'))
+        self.assertEqual(appended['points'][2], {'bookmark': 'safe'})
+
+        replaced, number, action = edit_bookmark_reference(original, 'safe', 2)
+        self.assertEqual((number, action), (2, 'Replaced'))
+        self.assertEqual(replaced['points'][1], {'bookmark': 'safe'})
+
+        inserted, number, action = edit_bookmark_reference(
+            original, 'safe', 2, insert=True)
+        self.assertEqual((number, action), (2, 'Inserted'))
+        self.assertEqual(inserted['points'][1], {'bookmark': 'safe'})
+        self.assertEqual(inserted['points'][2], original['points'][1])
+
+        numbered_append, number, action = edit_bookmark_reference(original, 'safe', 3)
+        self.assertEqual((number, action), (3, 'Appended'))
+        self.assertEqual(numbered_append['points'][-1], {'bookmark': 'safe'})
+        self.assertEqual(len(original['points']), 2)
+        self.assertNotIn('bookmark', original['points'][0])
+
+    def test_invalid_inline_bookmark_positions_fail_without_mutating_route(self):
+        original = sequence({'input_values': [1, 2, 3, 4, 5]})
+        before = json.dumps(original)
+        for number, insert in ((0, False), (3, False), (0, True),
+                               (4, True), (True, False), ('2', False)):
+            with self.subTest(number=number, insert=insert):
+                with self.assertRaises(ValueError):
+                    edit_bookmark_reference(original, 'safe', number, insert=insert)
+                self.assertEqual(json.dumps(original), before)
+        for name in ('', '2bad', 'bad name', 'bad@name'):
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError):
+                    edit_bookmark_reference(original, name)
 
     def test_can_delete_unreferenced_bookmark(self):
         with tempfile.TemporaryDirectory() as tmp:
