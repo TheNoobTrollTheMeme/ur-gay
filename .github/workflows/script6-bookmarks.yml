@@ -19,3 +19,5 @@ jobs:
         run: python -m compileall -q scripts tests
       - name: Test saved single poses and linked waypoints
         run: python -m unittest discover -s tests -p "test_pose_bookmarks.py" -v
+      - name: Test batch bookmark joint pasting (offline)
+        run: python -m unittest discover -s tests -p "test_batch_paste_bookmark_joint.py" -v
