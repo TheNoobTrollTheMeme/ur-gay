@@ -116,7 +116,7 @@ run_script6_function() {
         echo 'Missing Script 6 in installed arm project.' >&2
         return 1
     fi
-    "$python_cmd" - "$project" "$function" "$@" <<'PY'
+    "$python_cmd" -c "$(cat <<'PY'
 import importlib.util
 from pathlib import Path
 import sys
@@ -136,6 +136,7 @@ try:
 except (KeyboardInterrupt, EOFError):
     print('\nStopped.')
 PY
+)" "$project" "$function" "$@"
 }
 
 ask_torque_off() {
