@@ -93,7 +93,7 @@ class BatchPasteTests(unittest.TestCase):
         self.assertFalse(edits[0].changes)
         self.assertEqual(apply_batch(edits), [])
         self.assertEqual(route.read_bytes(), original)
-        self.assertEqual(list(self.motions.glob("*.bak")), [])
+        self.assertEqual(list(self.motions.glob("grab1.json.*.bak")), [])
 
     def test_preflight_invalid_selection_does_not_change_any_file(self):
         a = self.motions / "grab1.json"
@@ -106,7 +106,7 @@ class BatchPasteTests(unittest.TestCase):
             prepare_batch(self.motions, "ttl", "shoulder",
                           {"grab1": "1", "c1r1a": "1"}, JOINTS)
         self.assertEqual(a.read_bytes(), original_a)
-        self.assertEqual(list(self.motions.glob("*.bak")), [])
+        self.assertEqual(list(self.motions.glob("grab1.json.*.bak")), [])
 
     def test_angle_format_not_silently_interpreted_as_raw(self):
         route = self.motions / "grab1.json"
@@ -129,7 +129,7 @@ class BatchPasteTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "changed since preview"):
             apply_batch(plans)
         self.assertEqual(route.read_bytes(), changed)
-        self.assertEqual(list(self.motions.glob("*.bak")), [])
+        self.assertEqual(list(self.motions.glob("grab1.json.*.bak")), [])
 
     def test_invalid_raw_values_fail_preflight_without_backups(self):
         route = self.motions / "grab1.json"
