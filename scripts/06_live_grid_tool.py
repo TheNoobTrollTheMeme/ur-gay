@@ -18,6 +18,8 @@ from arm_helpers import (connect, disable_all_torque, enable_all_torque,
                          read_all, move_all_sync, position_to_angle, check_result)
 from terminal_keys import RawTerminal
 import competition_queue as competition
+from playback_speed import (DEFAULT_SPEED, DEFAULT_ACCELERATION,
+                            prompt_playback_settings, validate_playback_settings)
 from raw_capture_conversion import convert_recording_to_raw
 from validated_raw_save import save_raw_recording, validate_raw_recording
 
@@ -350,6 +352,7 @@ def test_grid(attack=False, auto=False):
         targets = live_attack_targets(path) if action == 'attack' else placement_targets(path)
         for _, target in targets:
             validate_target(target)
+    speed, acceleration = prompt_playback_settings()
     print('Order: ' + ', '.join(f'{p.stem[:-1]} {action}' for p, action in batch))
     print('One visit per square. Provide blocks for placement; set up attack squares as needed.')
     print('No camera/block detection. ' +
@@ -374,7 +377,7 @@ def test_grid(attack=False, auto=False):
                     return
                 # Seed the measured pose before enabling torque.
                 current = read_all(handler)
-                move_all_sync(handler, current, speed=300, acceleration=20)
+                move_all_sync(handler, current, speed=speed, acceleration=acceleration)
                 if stopped(terminal):
                     return
                 enable_all_torque(handler)
@@ -383,7 +386,7 @@ def test_grid(attack=False, auto=False):
                     if stopped(terminal):
                         return
                     print(f'\r\n{label}', flush=True)
-                    move_all_sync(handler, positions, speed=300, acceleration=20)
+                    move_all_sync(handler, positions, speed=speed, acceleration=acceleration)
                     if not wait_move(handler, terminal):
                         return
             completed = True
@@ -397,12 +400,15 @@ def test_grid(attack=False, auto=False):
             port.closePort()
 
 
-def run_saved_sequence(name, *, auto=False, dry_run=False):
+def run_saved_sequence(name, *, auto=False, dry_run=False,
+                       speed=DEFAULT_SPEED, acceleration=DEFAULT_ACCELERATION,
+                       high_speed_confirmed=False):
     """Play any saved sequence, including a newly recorded one.
 
     --auto skips the initial confirmation. Stops remain available at all times.
     This validates servo angle limits, not collisions or block readiness.
     """
+    speed, acceleration = validate_playback_settings(speed, acceleration)
     refresh_attacks()
     matches = [(path, data) for path, data in wp.find_sequences()
                if path.stem.lower() == name.lower()]
@@ -415,6 +421,7 @@ def run_saved_sequence(name, *, auto=False, dry_run=False):
     for positions in initial_points:
         validate_target(positions)
     print(f'Sequence: {path.stem} ({len(initial_points)} waypoints)')
+    print(f'Playback speed={speed}, acceleration={acceleration} (all waypoints)')
     print('Angle limits checked; collision clearance and block readiness are NOT checked.')
     if dry_run:
         for i, positions in enumerate(initial_points, 1):
@@ -422,6 +429,11 @@ def run_saved_sequence(name, *, auto=False, dry_run=False):
                                      for joint in settings.JOINT_NAMES))
         print('DRY RUN: no connection to the robot, no motion.')
         return
+    if (speed > 600 or acceleration > 35) and not high_speed_confirmed:
+        print('WARNING: High-speed motion may shift the arm or cause collisions.')
+        if input('Type CONFIRM to run at this speed: ').strip() != 'CONFIRM':
+            print('Playback cancelled.')
+            return
     if not auto:
         ready = input('Clear the workspace and support the arm. Enter to START, Q to cancel: ')
         if ready.strip().lower() == 'q':
@@ -434,7 +446,7 @@ def run_saved_sequence(name, *, auto=False, dry_run=False):
     try:
         with RawTerminal() as terminal:
             current = read_all(handler)
-            move_all_sync(handler, current, speed=300, acceleration=20)
+            move_all_sync(handler, current, speed=speed, acceleration=acceleration)
             if stopped(terminal):
                 return
             enable_all_torque(handler)
@@ -451,7 +463,7 @@ def run_saved_sequence(name, *, auto=False, dry_run=False):
                 positions = points[i]
                 validate_target(positions)
                 print(f'\r\n{path.stem}: waypoint {i + 1}/{len(initial_points)}', flush=True)
-                move_all_sync(handler, positions, speed=300, acceleration=20)
+                move_all_sync(handler, positions, speed=speed, acceleration=acceleration)
                 if not wait_move(handler, terminal):
                     return
             completed = True
@@ -496,12 +508,22 @@ def main():
                         help='with --sequence, skip readiness prompts')
     parser.add_argument('--dry-run', action='store_true',
                         help='with --sequence, validate and print poses without connecting')
+    parser.add_argument('--speed', type=int,
+                        help='with --sequence, servo playback speed (50..1200, default 300)')
+    parser.add_argument('--acceleration', type=int,
+                        help='with --sequence, servo playback acceleration (1..60, default 20)')
     args = parser.parse_args()
     if args.sequence:
-        run_saved_sequence(args.sequence, auto=args.auto, dry_run=args.dry_run)
+        try:
+            run_saved_sequence(args.sequence, auto=args.auto, dry_run=args.dry_run,
+                               speed=args.speed if args.speed is not None else DEFAULT_SPEED,
+                               acceleration=(args.acceleration if args.acceleration is not None
+                                             else DEFAULT_ACCELERATION))
+        except ValueError as error:
+            parser.error(str(error))
         return
-    if args.auto or args.dry_run:
-        parser.error('--auto and --dry-run require --sequence NAME')
+    if args.auto or args.dry_run or args.speed is not None or args.acceleration is not None:
+        parser.error('--auto, --dry-run, --speed and --acceleration require --sequence NAME')
     refresh_attacks()
     while True:
         answer = input('\n1 Live record/replace/remove  2 Random squares  3 Attack square  4 Sync ALL attacks  5 Copy current values  6 Auto grid  7 Run saved sequence  8 Competition: all motions  Q Quit: ').strip().lower()
@@ -530,7 +552,10 @@ def main():
                     continue
                 if not selected.isdigit() or not 1 <= int(selected) <= len(routes):
                     raise ValueError('Choose a listed sequence number')
-                run_saved_sequence(routes[int(selected) - 1][0].stem, auto=True)
+                speed, acceleration = prompt_playback_settings()
+                run_saved_sequence(routes[int(selected) - 1][0].stem, auto=True,
+                                   speed=speed, acceleration=acceleration,
+                                   high_speed_confirmed=True)
         except (ValueError, IndexError, OSError, RuntimeError, TimeoutError) as error:
             print(f'Error: {error}')
 
