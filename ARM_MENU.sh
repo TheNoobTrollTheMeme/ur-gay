@@ -9,7 +9,7 @@ help_text() {
     cat <<'EOF'
 Usage: arm [command] [arguments]
        arm                 interactive menu (works over SSH)
-       arm 1..5            original Kevin/Kelvin arm Scripts 01..05
+       arm 1..5            Kelvin arm Scripts 01..05 (5 supports @bookmarks)
        arm 6               custom live grid / waypoint editor
        arm 7               read-only raw debug capture (torque OFF)
        arm board           terminal arm board / macro maker
@@ -20,7 +20,7 @@ Usage: arm [command] [arguments]
        arm edit            jump straight into Script 6 recording editor
        arm bookmark        bookmark manager (capture, list, delete)
        arm goto NAME       move to a saved bookmark, with MOVE confirmation
-       arm saved NAME      play saved sequence (asks before motion)
+       arm saved NAME      play saved sequence or @bookmark (asks before motion)
        arm dry NAME        preview saved sequence, no hardware access
        arm --install       install command in ~/.local/bin + shell PATH
 
@@ -186,7 +186,7 @@ dispatch() {
         2|02|servo|raw) run_script scripts/02_move_servo.py "$@" ;;
         3|03|angles|angle) run_script scripts/03_move_joint_angle.py "$@" ;;
         4|04|timestamp|timestamps) run_script scripts/04_timestamp_motion.py "$@" ;;
-        5|05|waypoint|waypoints) run_script scripts/05_waypoint_sequence.py "$@" ;;
+        5|05|waypoint|waypoints) run_script scripts/05_bookmark_compat.py "$@" ;;
         6|06|grid|script6|mine) run_script scripts/06_live_grid_tool.py "$@" ;;
         7|07|debug|capture) ask_torque_off && run_script scripts/07_raw_debug_capture.py "$@" ;;
         b|board|macro|macros) run_script scripts/arm_board.py --terminal "$@" ;;
