@@ -26,6 +26,7 @@ from validated_raw_save import save_raw_recording, validate_raw_recording
 from pose_bookmarks import (
     normalize_name, save_bookmark, list_bookmarks, get_bookmark,
     delete_bookmark, resolve_points, load_with_bookmarks, save_linked_sequence,
+    edit_bookmark_reference,
 )
 
 spec = importlib.util.spec_from_file_location('waypoints', ROOT / 'scripts/05_waypoint_sequence.py')
@@ -116,7 +117,8 @@ def remove_waypoint(path, data):
         print('No such waypoint')
         return
     point = points[index]
-    print(f'Waypoint {index + 1}: {point.get("input_values", point.get("positions_raw"))}')
+    print(f'Waypoint {index + 1}: ' + ('@' + point['bookmark'] if 'bookmark' in point else
+          str(point.get('input_values', point.get('positions_raw')))))
     confirm = input(f'Remove waypoint {index + 1} from {path.stem}? [y/N]: ').strip().lower()
     if confirm not in ('y', 'yes'):
         print('Removal cancelled.')
@@ -265,6 +267,114 @@ def bookmark_menu(path=None, data=None):
             print(f'Bookmark error: {error}')
 
 
+
+
+def _editor_link_bookmark(path, data, name, position=None, *, insert=False):
+    """Link an existing named pose directly from the live waypoint prompt."""
+    name = normalize_name(name)
+    # Validate the saved pose before touching the route.
+    get_bookmark(BOOKMARK_FILE, name, settings.JOINT_NAMES)
+    updated, number, action = edit_bookmark_reference(
+        data, name, position, insert=insert)
+    commit(path, updated)
+    data['points'] = updated['points']
+    print(f'{action} @{name} at {path.stem} waypoint {number} (live linked).')
+
+
+def _editor_capture_bookmark(path, data, name, position=None, *, insert=False):
+    """Capture a new named pose and link it in the SAME editor operation."""
+    name = normalize_name(name)
+    # Check the requested slot before capturing or updating any shared pose.
+    updated, number, action = edit_bookmark_reference(
+        data, name, position, insert=insert)
+    existing = name in list_bookmarks(BOOKMARK_FILE, settings.JOINT_NAMES)
+    if existing and not _bookmark_replace_confirm(name):
+        print('Cancelled; existing bookmark and route unchanged.')
+        return
+    print(f'Capture @{name} and {action.lower()} it at waypoint {number}.')
+    pose = capture()
+    if pose is None:
+        print('Capture cancelled; bookmark and route unchanged.')
+        return
+    validate_raw_pose(pose, settings.JOINT_NAMES)
+    backup = save_bookmark(BOOKMARK_FILE, name, pose,
+                           settings.JOINT_NAMES, overwrite=existing)
+    print(f'Saved @{name}.' + (f' Backup: {backup.name}' if backup else ''))
+    # If route saving fails, the named pose is still retained for recovery.
+    commit(path, updated)
+    data['points'] = updated['points']
+    print(f'{action} linked @{name} at {path.stem} waypoint {number}.')
+
+
+def _editor_promote_waypoint(path, data, number, name):
+    """Name an already recorded point and convert its slot to a live link."""
+    if not 1 <= number <= len(data['points']):
+        raise ValueError('Choose an existing waypoint number to bookmark.')
+    name = normalize_name(name)
+    points = resolve_points(data, wp.parse_point_values,
+                            settings.JOINT_NAMES, BOOKMARK_FILE)
+    updated, _, _ = edit_bookmark_reference(data, name, number)
+    existing = name in list_bookmarks(BOOKMARK_FILE, settings.JOINT_NAMES)
+    if existing and not _bookmark_replace_confirm(name):
+        print('Cancelled; existing bookmark and route unchanged.')
+        return
+    backup = save_bookmark(BOOKMARK_FILE, name, points[number - 1],
+                           settings.JOINT_NAMES, overwrite=existing)
+    print(f'Saved waypoint {number} as @{name}.' +
+          (f' Backup: {backup.name}' if backup else ''))
+    commit(path, updated)
+    data['points'] = updated['points']
+    print(f'Waypoint {number} is now linked to @{name}.')
+
+
+def _editor_bookmark_command(path, data, choice):
+    """Process inline editor bookmark commands; return True when handled."""
+    if choice in ('b', 'm'):
+        bookmark_menu(path, data)
+        return True
+    if choice == 'l':
+        saved = list_bookmarks(BOOKMARK_FILE, settings.JOINT_NAMES)
+        print('Bookmarks: ' + (', '.join('@' + name for name in saved) or '(none yet)'))
+        return True
+    words = choice.split()
+    if words and words[0] == 'b' and len(words) > 1:
+        # B safe_left: capture & append.
+        # B 2 safe_left: capture & replace #2.
+        # B +2 safe_left: capture & insert before #2.
+        if len(words) == 2:
+            _editor_capture_bookmark(path, data, words[1])
+        elif len(words) == 3 and re.fullmatch(r'\+?[1-9]\d*', words[1]):
+            _editor_capture_bookmark(
+                path, data, words[2], int(words[1]), insert=words[1].startswith('+'))
+        else:
+            print('Use B name, B 2 name, or B +2 name.')
+        return True
+    if words and words[0] == 's':
+        if len(words) == 3 and re.fullmatch(r'[1-9]\d*', words[1]):
+            _editor_promote_waypoint(path, data, int(words[1]), words[2])
+        else:
+            print('Use S 2 name to save and link existing waypoint #2.')
+        return True
+    if words and words[0] == 'g':
+        if len(words) == 2:
+            go_to_bookmark(words[1].lstrip('@'))
+        else:
+            print('Use G name to move to a bookmark (requires MOVE confirmation).')
+        return True
+    # @name = append; 2@name = replace #2; +2@name = insert before #2.
+    shortcut = re.fullmatch(r'(\+?)([1-9]\d*)?@([a-z][a-z0-9_-]{0,47})', choice)
+    if shortcut:
+        plus, number, name = shortcut.groups()
+        if plus and not number:
+            print('Insert requires a waypoint number, such as +2@safe_left.')
+        else:
+            _editor_link_bookmark(path, data, name,
+                                  int(number) if number else None, insert=bool(plus))
+        return True
+    return False
+
+
+
 def record():
     routes = choose()
     answer = input('Sequence number to edit, N new, B bookmarks, Q return: ').strip().lower()
@@ -314,30 +424,17 @@ def record():
         for i, point in enumerate(data['points'], 1):
             print(f'{i}: @{point["bookmark"]}' if 'bookmark' in point else
                   f'{i}: {point.get("input_values", point.get("positions_raw"))}')
-        choice = input('Waypoint # replace, A append, @name append link, 2@name replace, B bookmarks, D remove, Q finish: ').strip().lower()
+        print('A capture append | # capture replace | B name capture+bookmark+append')
+        print('B # name replace | B +# name insert | @name append | #@name replace | +#@name insert')
+        print('S # name save existing point as bookmark | L list | G name move | M manage | D remove | Q finish')
+        choice = input(f'{path.stem}> ').strip().lower()
         if choice == 'q':
             return
-        if choice == 'b':
-            bookmark_menu(path, data)
-            continue
-        # Quick link: @safe_left appends; 2@safe_left replaces waypoint 2.
-        inline = re.fullmatch(r'([1-9]\d*)?@([a-z][a-z0-9_-]{0,47})', choice)
-        if inline:
-            target_index = int(inline.group(1)) - 1 if inline.group(1) else len(data['points'])
-            name = inline.group(2)
-            get_bookmark(BOOKMARK_FILE, name, settings.JOINT_NAMES)
-            if not 0 <= target_index <= len(data['points']):
-                print('No such waypoint')
+        try:
+            if _editor_bookmark_command(path, data, choice):
                 continue
-            points = list(data['points'])
-            if target_index == len(points):
-                points.append({'bookmark': name})
-            else:
-                points[target_index] = {'bookmark': name}
-            updated = dict(data, points=points)
-            commit(path, updated)
-            data['points'] = points
-            print(f'Linked waypoint {target_index + 1} to @{name}.')
+        except (ValueError, TypeError, OSError, RuntimeError, TimeoutError) as error:
+            print(f'Bookmark error: {error}')
             continue
         if choice == 'd':
             remove_waypoint(path, data)
