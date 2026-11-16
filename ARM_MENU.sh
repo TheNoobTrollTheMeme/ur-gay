@@ -18,6 +18,8 @@ Usage: arm [command] [arguments]
        arm attack          full live square attack selector
        arm joycon          Joy-Con diagnostics (no movement)
        arm edit            jump straight into Script 6 recording editor
+       arm bookmark        bookmark manager (capture, list, delete)
+       arm goto NAME       move to a saved bookmark, with MOVE confirmation
        arm saved NAME      play saved sequence (asks before motion)
        arm dry NAME        preview saved sequence, no hardware access
        arm --install       install command in ~/.local/bin + shell PATH
@@ -109,11 +111,12 @@ run_script() {
 # Script 6 has a Python-callable queue/editor API, so do not modify upstream files.
 run_script6_function() {
     local function="$1"
+    shift
     if [[ ! -f "$project/scripts/06_live_grid_tool.py" ]]; then
         echo 'Missing Script 6 in installed arm project.' >&2
         return 1
     fi
-    "$python_cmd" - "$project" "$function" <<'PY'
+    "$python_cmd" - "$project" "$function" "$@" <<'PY'
 import importlib.util
 from pathlib import Path
 import sys
@@ -129,7 +132,7 @@ if spec is None or spec.loader is None:
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 try:
-    getattr(module, function)()
+    getattr(module, function)(*sys.argv[3:])
 except (KeyboardInterrupt, EOFError):
     print('\nStopped.')
 PY
@@ -140,6 +143,20 @@ ask_torque_off() {
     echo 'WARNING: This script disables servo torque. SUPPORT the arm first.'
     read -r -p 'Enter = continue, Q = cancel: ' answer || return 1
     [[ "$answer" != 'q' && "$answer" != 'Q' ]]
+}
+
+run_goto() {
+    local name="${1:-}"
+    if [[ -z "$name" ]]; then
+        read -r -p 'Bookmark name (e.g. safe_left): ' name || return 1
+    fi
+    name="${name#@}"
+    if [[ -z "$name" ]]; then
+        echo 'No bookmark selected.'
+        return 1
+    fi
+    # Script 6 validates the bookmark and requires typing MOVE before motion.
+    run_script6_function go_to_bookmark "$name"
 }
 
 run_saved() {
@@ -177,6 +194,8 @@ dispatch() {
         a|attack) run_script scripts/06_full_live_attack.py "$@" ;;
         j|joycon|joy) run_script scripts/smash_joycon.py --diagnose ;;
         e|edit|record) run_script6_function record ;;
+        p|bookmark|bookmarks|point|points) run_script6_function bookmark_menu ;;
+        g|goto|go) run_goto "$@" ;;
         s|saved|play) run_saved no "$@" ;;
         d|dry|preview) run_saved yes "$@" ;;
         q|quit|exit|0) return 99 ;;
@@ -199,6 +218,8 @@ menu() {
   5  Waypoint record & playback   M  Tray / winning line remap
                                   A  Full live square attack
                                   E  Edit recorded waypoints
+                                  P  Bookmark manager (capture/list)
+                                  G  Go to named bookmark
                                   S  Play saved motion by name
                                   D  Preview motion (no hardware)
                                   J  Joy-Con diagnostics
