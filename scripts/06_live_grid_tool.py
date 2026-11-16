@@ -314,11 +314,30 @@ def record():
         for i, point in enumerate(data['points'], 1):
             print(f'{i}: @{point["bookmark"]}' if 'bookmark' in point else
                   f'{i}: {point.get("input_values", point.get("positions_raw"))}')
-        choice = input('Waypoint number to REPLACE, A append, D remove, B bookmarks, Q finish: ').strip().lower()
+        choice = input('Waypoint # replace, A append, @name append link, 2@name replace, B bookmarks, D remove, Q finish: ').strip().lower()
         if choice == 'q':
             return
         if choice == 'b':
             bookmark_menu(path, data)
+            continue
+        # Quick link: @safe_left appends; 2@safe_left replaces waypoint 2.
+        inline = re.fullmatch(r'([1-9]\\d*)?@([a-z][a-z0-9_-]{0,47})', choice)
+        if inline:
+            target_index = int(inline.group(1)) - 1 if inline.group(1) else len(data['points'])
+            name = inline.group(2)
+            get_bookmark(BOOKMARK_FILE, name, settings.JOINT_NAMES)
+            if not 0 <= target_index <= len(data['points']):
+                print('No such waypoint')
+                continue
+            points = list(data['points'])
+            if target_index == len(points):
+                points.append({'bookmark': name})
+            else:
+                points[target_index] = {'bookmark': name}
+            updated = dict(data, points=points)
+            commit(path, updated)
+            data['points'] = points
+            print(f'Linked waypoint {target_index + 1} to @{name}.')
             continue
         if choice == 'd':
             remove_waypoint(path, data)
