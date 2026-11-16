@@ -18,7 +18,7 @@ ENTER_KEYS = (10, 13, curses.KEY_ENTER)
 BACKSPACE_KEYS = (8, 127, curses.KEY_BACKSPACE)
 
 
-def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activity, busy, turbo, queue_count, link_filename):
+def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activity, busy, turbo, queue_count, link_filename, speed_label=None):
     screen.erase()
     height, width = screen.getmaxyx()
 
@@ -26,7 +26,8 @@ def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activit
         if 0 <= y < height and x < width - 1:
             screen.addnstr(y, x, text, width - x - 1, attr)
 
-    line(0, f"ARM BOARD   {mode.upper()}   {'LIVE' if live else 'PREVIEW'}   {'TURBO' if turbo else 'NORMAL'}", curses.A_BOLD)
+    playback_label = speed_label or ('TURBO' if turbo else 'NORMAL')
+    line(0, f"ARM BOARD   {mode.upper()}   {'LIVE' if live else 'PREVIEW'}   {playback_label}", curses.A_BOLD)
     placement_keys = (
         f"1-9 or arrows + Enter add a square   Queued: {queue_count}"
         if mode == "queue" else "1-9 selects a square   Arrows + Enter also work"
@@ -75,7 +76,7 @@ def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activit
     screen.refresh()
 
 
-def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, sync_winning_lines, link_winning_line, turbo):
+def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, sync_winning_lines, link_winning_line, turbo, speed_label=None):
     try:
         curses.curs_set(0)
     except curses.error:
@@ -134,6 +135,7 @@ def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, 
             draw(
                 screen, cursor, "queue" if queueing else mode, live, pickup,
                 selecting, pending, status, activity, thread is not None, turbo, len(placements), link_filename,
+                speed_label=speed_label,
             )
             key = screen.getch()
             if link_filename is not None:
@@ -286,11 +288,11 @@ def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, 
             thread.join()
 
 
-def run_terminal(build_plan, play, *, compose_queue, export_winning_line, sync_winning_lines, link_winning_line, turbo=False):
+def run_terminal(build_plan, play, *, compose_queue, export_winning_line, sync_winning_lines, link_winning_line, turbo=False, speed_label=None):
     try:
         curses.wrapper(
             terminal_loop, build_plan, play, compose_queue, export_winning_line,
-            sync_winning_lines, link_winning_line, turbo,
+            sync_winning_lines, link_winning_line, turbo, speed_label,
         )
     except KeyboardInterrupt:
         pass
