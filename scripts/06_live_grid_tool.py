@@ -695,6 +695,21 @@ def run_saved_sequence(name, *, auto=False, dry_run=False,
     This validates servo angle limits, not collisions or block readiness.
     """
     speed, acceleration = validate_playback_settings(speed, acceleration)
+    if name.startswith('@'):
+        # Bookmarks are single reusable poses, not two-point motion files.
+        # Keep the explicit MOVE confirmation and existing stop handling.
+        bookmark_name = normalize_name(name[1:])
+        if (speed, acceleration) != (DEFAULT_SPEED, DEFAULT_ACCELERATION):
+            raise ValueError('Single-bookmark goto uses normal speed/acceleration only.')
+        pose = get_bookmark(BOOKMARK_FILE, bookmark_name, settings.JOINT_NAMES)
+        validate_target(pose)
+        if dry_run:
+            print(f'Bookmark @{bookmark_name}:')
+            print(' '.join(f'{j}={pose[j]}' for j in settings.JOINT_NAMES))
+            print('DRY RUN: one pose, no arm connection. Travel clearance is NOT checked.')
+            return
+        go_to_bookmark(bookmark_name)
+        return
     refresh_attacks()
     matches = [(path, data) for path, data in wp.find_sequences()
                if path.stem.lower() == name.lower()]
@@ -771,7 +786,8 @@ def competition_placements():
         connect=connect, read_all=read_all,
         enable_all_torque=enable_all_torque,
         disable_all_torque=disable_all_torque, terminal_class=RawTerminal,
-        settings=settings, check_result=check_result)
+        settings=settings, check_result=check_result,
+        bookmarks=list_bookmarks(BOOKMARK_FILE, settings.JOINT_NAMES))
 
 
 def copy_current_values():
