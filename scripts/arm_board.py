@@ -6,9 +6,11 @@ from datetime import datetime
 from functools import partial
 import importlib.util
 from itertools import count
+import json
 import os
 from pathlib import Path
 from queue import Empty, Queue
+import re
 import sys
 from tempfile import TemporaryDirectory
 from threading import Event, Thread
@@ -21,6 +23,7 @@ WINNING_LINES = {
         "C1R1 C2R2 C3R3", "C3R1 C2R2 C1R3",
     )
 }
+WINNING_LINE_FILE = re.compile(r"winning_line_(c[1-3]r[1-3])_(c[1-3]r[1-3])_(c[1-3]r[1-3])(?:_\d+)?\.json")
 
 
 @dataclass(frozen=True)
@@ -142,14 +145,14 @@ def compose_queue(plans):
     )
 
 
-def export_winning_line(script6, folder, plans):
+def winning_line_motion(script6, plans):
     cells = tuple(plan.cell for plan in plans)
     if len(cells) != 3 or frozenset(cells) not in WINNING_LINES:
         raise ValueError("Queue three distinct squares in a row, column, or diagonal.")
     plan = compose_queue(plans)
     joints = script6.settings.JOINT_NAMES
     base = "winning_line_" + "_".join(cell.lower() for cell in cells)
-    sequence = {
+    return {
         "schema_version": 1,
         "type": "pose_sequence",
         "name": base,
@@ -159,11 +162,17 @@ def export_winning_line(script6, folder, plans):
         "joint_order": [
             {"joint": joint, "servo_id": script6.settings.SERVO_IDS[joint]} for joint in joints
         ],
+        "source_placements": [{"cell": item.cell, "pickup": item.pickup} for item in plans],
         "points": [
             {"input_values": [waypoint.positions[joint] for joint in joints]}
             for waypoint in plan.waypoints
         ],
     }
+
+
+def export_winning_line(script6, folder, plans):
+    sequence = winning_line_motion(script6, plans)
+    base = sequence["name"]
     with TemporaryDirectory(prefix=".winning-line-", dir=folder) as directory:
         temporary = Path(directory) / "sequence.json"
         for number in count(1):
@@ -178,6 +187,79 @@ def export_winning_line(script6, folder, plans):
             except FileExistsError:
                 continue
             return output
+
+
+def read_winning_line(path):
+    match = WINNING_LINE_FILE.fullmatch(path.name)
+    if not match:
+        raise ValueError("Enter a saved winning line filename.")
+    original = path.read_bytes()
+    data = json.loads(original)
+    if not isinstance(data, dict) or data.get("type") != "pose_sequence" or data.get("name") != path.stem:
+        raise ValueError("File is not a board winning-line export.")
+    return tuple(cell.upper() for cell in match.groups()), original, data
+
+
+def refresh_winning_line(script6, path, cells, original, data, recipe):
+    if not isinstance(recipe, list) or len(recipe) != len(cells):
+        raise ValueError("Invalid saved tray selections.")
+    plans = []
+    for cell, item in zip(cells, recipe):
+        if not isinstance(item, dict) or item.get("cell") != cell or "pickup" not in item:
+            raise ValueError("Saved tray selections do not match the line in the filename.")
+        pickup = item["pickup"]
+        if pickup is not None and (type(pickup) is not int or pickup not in range(1, 7)):
+            raise ValueError(f"Invalid tray selection for {cell}.")
+        plans.append(build_plan(script6, path.parent, int(cell[1]), int(cell[3]), "place", pickup))
+
+    rebuilt = winning_line_motion(script6, plans)
+    updated = {
+        **data,
+        **{key: rebuilt[key] for key in ("input_type", "joint_order", "source_placements", "points")},
+    }
+    if data == updated:
+        return False
+    updated["updated_at"] = datetime.now().astimezone().isoformat()
+    with TemporaryDirectory(prefix=".winning-line-", dir=path.parent) as directory:
+        temporary = Path(directory) / path.name
+        script6.wp.save_sequence(temporary, updated)
+        if path.read_bytes() != original:
+            raise ValueError("Saved line changed during sync. Try again.")
+        temporary.replace(path)
+    return True
+
+
+def sync_winning_lines(script6, folder):
+    results = []
+    for path in sorted(folder.glob("winning_line_*.json")):
+        if not WINNING_LINE_FILE.fullmatch(path.name):
+            continue
+        try:
+            cells, original, data = read_winning_line(path)
+            if "source_placements" not in data:
+                results.append(f"{path.name}: queue its placements and press U once to link it.")
+                continue
+            changed = refresh_winning_line(script6, path, cells, original, data, data["source_placements"])
+        except (OSError, ValueError, RuntimeError) as error:
+            results.append(f"{path.name}: {error}")
+        else:
+            results.append(f"{path.name}: {'updated' if changed else 'already current'}")
+    return results or ["No saved winning lines found."]
+
+
+def link_winning_line(script6, folder, plans, filename):
+    sequence = winning_line_motion(script6, plans)
+    filename = filename.strip() or sequence["name"]
+    if not filename.endswith(".json"):
+        filename += ".json"
+    if not WINNING_LINE_FILE.fullmatch(filename):
+        raise ValueError("Enter a saved winning line filename.")
+    path = folder / filename
+    cells, original, data = read_winning_line(path)
+    if cells != tuple(plan.cell for plan in plans):
+        raise ValueError("Queue the squares in the same order as the saved filename.")
+    refresh_winning_line(script6, path, cells, original, data, sequence["source_placements"])
+    return path
 
 
 class StopInput:
@@ -348,6 +430,8 @@ def main():
                 partial(play, script6, turbo=args.turbo),
                 compose_queue=compose_queue,
                 export_winning_line=partial(export_winning_line, script6, motions),
+                sync_winning_lines=partial(sync_winning_lines, script6, motions),
+                link_winning_line=partial(link_winning_line, script6, motions),
                 turbo=args.turbo,
             )
         except curses.error as error:

@@ -18,7 +18,7 @@ ENTER_KEYS = (10, 13, curses.KEY_ENTER)
 BACKSPACE_KEYS = (8, 127, curses.KEY_BACKSPACE)
 
 
-def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activity, busy, turbo, queue_count):
+def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activity, busy, turbo, queue_count, link_filename):
     screen.erase()
     height, width = screen.getmaxyx()
 
@@ -51,12 +51,15 @@ def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activit
         pickup_label = f"Tray: Grab {pickup} ({TRAY_LABELS[pickup]})"
     line(11, pickup_label)
     line(12, "G tray   0 clear tray   B board/queue   L live/preview")
-    line(13, "Space/Esc stop   Q quit")
     if mode == "queue":
+        line(13, "Space/Esc stop   Q quit   S sync lines   U link old line")
         line(14, "W export line   R run   Backspace undo   C clear")
     else:
+        line(13, "Space/Esc stop   Q quit")
         line(14, "A attack/place")
-    if pending:
+    if link_filename is not None:
+        line(16, f"File: {link_filename or '<matching filename>'}", curses.A_BOLD)
+    elif pending:
         help_text = "Confirm a held cylinder or cube. Y run / N cancel." if pending.requires_held_block else "Y run attack / N cancel."
         line(16, help_text, curses.A_BOLD)
     elif busy:
@@ -72,7 +75,7 @@ def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activit
     screen.refresh()
 
 
-def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, turbo):
+def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, sync_winning_lines, link_winning_line, turbo):
     try:
         curses.curs_set(0)
     except curses.error:
@@ -88,6 +91,7 @@ def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, 
     placements = []
     pickup = None
     pending = None
+    link_filename = None
     thread = None
     status = "Ready"
     activity = deque(maxlen=60)
@@ -129,9 +133,28 @@ def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, 
                 return
             draw(
                 screen, cursor, "queue" if queueing else mode, live, pickup,
-                selecting, pending, status, activity, thread is not None, turbo, len(placements),
+                selecting, pending, status, activity, thread is not None, turbo, len(placements), link_filename,
             )
             key = screen.getch()
+            if link_filename is not None:
+                if key == 27:
+                    link_filename = None
+                    status = "Link cancelled"
+                elif key in ENTER_KEYS:
+                    try:
+                        path = link_winning_line(tuple(placements), link_filename.strip())
+                    except (OSError, ValueError, RuntimeError) as error:
+                        status = "Could not link winning line"
+                        activity.append(str(error))
+                    else:
+                        status = "Winning line linked and synced"
+                        activity.append(f"Linked {path.name}")
+                    link_filename = None
+                elif key in BACKSPACE_KEYS:
+                    link_filename = link_filename[:-1]
+                elif 32 <= key <= 126:
+                    link_filename += chr(key)
+                continue
             if key in (ord("q"), ord("Q")):
                 closing = True
                 requested_stop.set()
@@ -186,6 +209,19 @@ def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, 
             if queueing and key in (ord("c"), ord("C")):
                 placements.clear()
                 status = "Queue cleared"
+                continue
+            if queueing and key in (ord("s"), ord("S")):
+                try:
+                    activity.extend(sync_winning_lines())
+                except (OSError, ValueError, RuntimeError) as error:
+                    status = "Could not sync winning lines"
+                    activity.append(str(error))
+                else:
+                    status = "Winning line sync complete"
+                continue
+            if queueing and key in (ord("u"), ord("U")):
+                link_filename = ""
+                status = "Enter filename, blank uses matching name. Esc cancels."
                 continue
             if queueing and key in (ord("w"), ord("W")):
                 try:
@@ -250,8 +286,11 @@ def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, 
             thread.join()
 
 
-def run_terminal(build_plan, play, *, compose_queue, export_winning_line, turbo=False):
+def run_terminal(build_plan, play, *, compose_queue, export_winning_line, sync_winning_lines, link_winning_line, turbo=False):
     try:
-        curses.wrapper(terminal_loop, build_plan, play, compose_queue, export_winning_line, turbo)
+        curses.wrapper(
+            terminal_loop, build_plan, play, compose_queue, export_winning_line,
+            sync_winning_lines, link_winning_line, turbo,
+        )
     except KeyboardInterrupt:
         pass
