@@ -89,6 +89,8 @@ scripts=(
     validated_raw_save.py
     arm_board.py
     arm_board_terminal.py
+    tray_mapping.py
+    tray_remap.py
     smash_joycon.py
 )
 
