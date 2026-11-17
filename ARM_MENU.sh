@@ -20,7 +20,8 @@ Usage: arm [command] [arguments]
        arm legacycomp      old competition / Joy-Con queue editor
        arm remap           offline tray / winning-line remapper
        arm attack          full live square attack selector
-       arm sweep           9-square live forward/back diagnostic
+       arm sweep           saved c#r#m sweep options: each move + exact reverse
+       arm sweep --continuous --speed 300 --accel 20
        arm joycon          Joy-Con diagnostics (no movement)
        arm edit            jump straight into Script 6 recording editor
        arm paste            batch-paste ONE bookmark joint into chosen waypoints
@@ -206,7 +207,13 @@ dispatch() {
         v|trayref|tray-reference|reftray) run_script scripts/competition_quick.py --tray "$@" ;;
         m|remap|mapping|tray) run_script scripts/arm_board.py --remap ;;
         a|attack) run_script scripts/06_full_live_attack.py "$@" ;;
-        t|test|sweep|roundtrip|round-trip) run_script scripts/06_live_square_sweep.py "$@" ;;
+        t|test|sweep|roundtrip|round-trip)
+            if (( $# == 0 )); then
+                run_script scripts/06_live_square_sweep.py --menu
+            else
+                run_script scripts/06_live_square_sweep.py "$@"
+            fi
+            ;;
         j|joycon|joy) run_script scripts/smash_joycon.py --diagnose ;;
         e|edit|record) run_script6_function record ;;
         x|paste|batch|jointpaste) run_script scripts/batch_paste_bookmark_joint.py "$@" ;;
@@ -235,7 +242,7 @@ menu() {
                                   A  Full live square attack
                                   K  Old COMP with Joy-Con
                                   V  Tray reference (view/edit)
-                                  T  Live 9-square round-trip test
+                                  T  Saved move sweep: each c#r#m + reverse
                                   E  Edit recorded waypoints
                                   X  Batch-paste bookmark coordinate
                                   P  Bookmark manager (capture/list)

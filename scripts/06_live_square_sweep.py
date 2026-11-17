@@ -1,39 +1,35 @@
 #!/usr/bin/env python3
-"""Guided, LIVE 3x3 board sweep: 9 cells out, then the same cells back.
+"""Replay each saved square move forward, then retrace its recorded waypoints.
 
-Each motions/live_c#r#.json route begins at a SHARED, manually taught
-@sweep_home bookmark, travels through taught clearance waypoints to a square,
-then reverses those exact waypoints to the shared home. Never interpolate
-directly between square endpoints. Routes/bookmarks reload between visits.
-
-No path planner can establish physical ceiling clearance from servo ticks.
-Operate only after teaching and checking every transition on the real rig.
+Order: c1r1m, c1r2m, c1r3m, c2r1m, c2r2m, c2r3m, c3r1m, c3r2m, c3r3m.
+Each installed motions/c#r#m.json runs once: 1 -> 2 -> ... -> N -> ... -> 2 -> 1.
+The return uses the same resolved waypoint snapshot, including the gripper.
+The next recording is reloaded before its turn. No generated home or route.
 """
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
 import importlib.util
-import json
 from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+from playback_speed import (DEFAULT_SPEED, DEFAULT_ACCELERATION,
+                            validate_playback_settings)
+
 MOTIONS = ROOT / "motions"
-EDITOR_PATH = ROOT / "scripts" / "06_live_grid_tool.py"
-HOME = "sweep_home"
-ORDER = ("c1r1", "c2r1", "c3r1", "c3r2", "c2r2", "c1r2", "c1r3", "c2r3", "c3r3")
-ROUND_TRIP = ORDER + ORDER[-2::-1]  # 9 outward and 8 back; do not repeat the turn.
-MAX_JOINT_STEP = 250  # raw ticks; a guard, NOT a collision/height calculation
-HOME_TOLERANCE = 50
+EDITOR_PATH = SCRIPTS / "06_live_grid_tool.py"
+ORDER = ("c1r1", "c1r2", "c1r3", "c2r1", "c2r2", "c2r3", "c3r1", "c3r2", "c3r3")
 ARRIVAL_TOLERANCE = 90
 STOP_KEYS = frozenset((" ", "q", "\x03", "\x1b"))
 
 
 def load_editor():
-    """Import only installed Script 6, never the upstream Kelvin file directly."""
+    """Import installed Script 6, including its normal bookmark resolver."""
     sys.path.insert(0, str(ROOT))
-    sys.path.insert(0, str(ROOT / "scripts"))
     spec = importlib.util.spec_from_file_location("sweep_script6", EDITOR_PATH)
     if spec is None or spec.loader is None:
         raise FileNotFoundError(f"Script 6 missing: {EDITOR_PATH}")
@@ -45,7 +41,7 @@ def load_editor():
 def route_path(cell, motions=MOTIONS):
     if cell not in ORDER:
         raise ValueError(f"Unknown board cell: {cell}")
-    return motions / f"live_{cell}.json"
+    return Path(motions) / f"{cell}m.json"
 
 
 def arm_joints(editor):
@@ -56,110 +52,67 @@ def max_arm_delta(editor, a, b):
     return max(abs(int(a[j]) - int(b[j])) for j in arm_joints(editor))
 
 
-def home_pose(editor):
-    pose = editor.get_bookmark(editor.BOOKMARK_FILE, HOME, editor.settings.JOINT_NAMES)
-    editor.validate_competition_target(pose)
-    editor.validate_target(pose)
-    return pose
-
-
-def initialize_routes(editor, motions=MOTIONS):
-    """Create NON-RUNNABLE teaching templates without touching existing files."""
-    home_pose(editor)  # requires a real, captured @sweep_home first
-    motions.mkdir(parents=True, exist_ok=True)
-    count = 0
-    for cell in ORDER:
-        path = route_path(cell, motions)
-        data = {
-            "schema_version": 1,
-            "type": "pose_sequence",
-            "name": path.stem,
-            "description": "TEACH BEFORE RUNNING: common home, safe clearance, square target",
-            "input_type": "raw",
-            "joint_order": [
-                {"servo_id": editor.settings.SERVO_IDS[j], "joint": j}
-                for j in editor.settings.JOINT_NAMES
-            ],
-            "created_at": datetime.now().astimezone().isoformat(),
-            "points": [{"bookmark": HOME}, {"bookmark": HOME}, {"bookmark": HOME}],
-        }
-        try:
-            with path.open("x", encoding="utf-8") as handle:
-                json.dump(data, handle, indent=2)
-                handle.write("\n")
-            count += 1
-        except FileExistsError:
-            print(f"Preserved existing {path.name}")
-    print(f"Created {count} teaching template(s). No arm movement.")
-    print("Edit each live_c#r# in 'arm edit': keep #1 @sweep_home; "
-          "replace #2 with a VERIFIED clearance pose and #3 with its square pose. "
-          "Insert more waypoints as needed. Placeholder routes cannot run.")
-
-
-def read_route(editor, cell, anchor, motions=MOTIONS):
-    """Read a fresh, live-linked route and reject unsafe/malformed skeletons."""
+def read_route(editor, cell, motions=MOTIONS):
+    """Resolve the existing move recording once and copy its complete poses."""
     path = route_path(cell, motions)
     if not path.is_file():
-        raise ValueError(f"Missing {path.name}. Capture @{HOME}, then run 'arm sweep --init'.")
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"Cannot read {path.name}: {exc}") from exc
-    points_def = data.get("points")
-    if (not isinstance(points_def, list) or len(points_def) < 3
-            or points_def[0] != {"bookmark": HOME}):
         raise ValueError(
-            f"{path.name}: needs 3+ taught points, starting with linked @{HOME}.")
-    if data.get("input_type") != "raw":
-        raise ValueError(f"{path.name}: expected raw position recording.")
-    _, points = editor.wp.load_sequence(path)  # resolves CURRENT linked bookmarks
-    if len(points) != len(points_def):
+            f"Missing {path}. Sweep uses your installed motions/{cell}m.json recording.")
+    data, points = editor.wp.load_sequence(path)
+    if not isinstance(data, dict) or data.get("input_type") != "raw":
+        raise ValueError(f"{path.name}: expected a saved raw position recording.")
+    definitions = data.get("points")
+    if not isinstance(definitions, list) or len(definitions) < 2:
+        raise ValueError(f"{path.name}: needs at least two saved waypoints.")
+    if len(points) != len(definitions):
         raise ValueError(f"{path.name}: number of decoded waypoints changed.")
-    for n, point in enumerate(points, 1):
+    for point in points:
+        # Match raw COMP playback: exact joints and integer servo register range.
         editor.validate_competition_target(point)
-        editor.validate_target(point)
-        if n > 1:
-            jump = max_arm_delta(editor, points[n - 2], point)
-            if jump > MAX_JOINT_STEP:
-                raise ValueError(
-                    f"{path.name} segment {n-1}->{n}: {jump} raw ticks on an arm joint "
-                    f"(limit {MAX_JOINT_STEP}). Teach additional intermediate poses.")
-    if max_arm_delta(editor, points[0], anchor):
-        raise ValueError(f"{path.name}: first waypoint no longer matches @{HOME}.")
-    if max_arm_delta(editor, points[-1], anchor) <= HOME_TOLERANCE:
-        raise ValueError(f"{path.name}: final square target is still the home placeholder.")
-    if max_arm_delta(editor, points[1], anchor) <= 0:
-        raise ValueError(f"{path.name}: waypoint #2 is still the home placeholder.")
-    return tuple(dict(p) for p in points)
+    return tuple(dict(point) for point in points)
+
+
+def round_trip_steps(route):
+    """A,B,C becomes A,B,C,B,A; omit only the repeated turnaround endpoint."""
+    snapshot = tuple(dict(point) for point in route)
+    if len(snapshot) < 2:
+        raise ValueError("A sweep route needs at least two waypoints.")
+    return tuple(dict(point) for point in snapshot + snapshot[-2::-1])
 
 
 def preflight(editor, motions=MOTIONS):
-    """Validate all nine live paths before ANY hardware connection."""
-    anchor = home_pose(editor)
-    routes = {}
-    errors = []
+    """Validate all nine installed move recordings before connecting."""
+    routes, errors = {}, []
     for cell in ORDER:
         try:
-            routes[cell] = read_route(editor, cell, anchor, motions)
+            routes[cell] = read_route(editor, cell, motions)
         except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
-            errors.append(f"{cell.upper()}: {exc}")
+            errors.append(f"{cell}m: {exc}")
     if errors:
         raise ValueError("Sweep preflight failed; no motor connection:\n  " +
                          "\n  ".join(errors))
-    return anchor, routes
+    return routes
 
 
-def preview(editor, motions=MOTIONS):
-    _, routes = preflight(editor, motions)
-    print("LIVE 9-SQUARE SWEEP, NO MOTOR CONNECTION")
-    print("Out:  " + " -> ".join(cell.upper() for cell in ORDER))
-    print("Back: " + " -> ".join(cell.upper() for cell in ORDER[-2::-1]))
-    print("Every visit: @sweep_home -> taught clearance -> square -> REVERSE -> @sweep_home")
+def _show_plan(routes, *, speed, acceleration):
+    print("SAVED MOVE SWEEP: each recording forward, then the SAME waypoints back")
+    print("Order: " + " -> ".join(f"{cell}m" for cell in ORDER))
     for cell in ORDER:
-        print(f"  {cell.upper():5} {len(routes[cell])} linked/taught points, "
-              f"{2 * (len(routes[cell]) - 1)} motor steps per visit")
-    print("All joints checked for range and angle limits; per-step delta limited.")
-    print("Ceiling/rack clearance CANNOT be proven from encoder positions. Inspect routes in person.")
+        count = len(routes[cell])
+        indices = list(range(1, count + 1)) + list(range(count - 1, 0, -1))
+        print(f"  {cell}m: " + " -> ".join(map(str, indices)))
+    print(f"Arm speed={speed}, acceleration={acceleration}; normal gripper speed.")
+    print("Each route starts at its saved first point and returns there before the next route.")
+    print("All saved joint values are kept. No placement sequence or generated path is added.")
+
+
+def preview(editor, motions=MOTIONS, *, speed=DEFAULT_SPEED,
+            acceleration=DEFAULT_ACCELERATION):
+    speed, acceleration = validate_playback_settings(speed, acceleration)
+    routes = preflight(editor, motions)
+    _show_plan(routes, speed=speed, acceleration=acceleration)
+    print("PREVIEW: no motor connection.")
+    return routes
 
 
 def await_enter(terminal, message):
@@ -172,17 +125,24 @@ def await_enter(terminal, message):
             return True
 
 
-def run(editor, motions=MOTIONS, *, continuous=False):
-    """Physical motion only after explicit confirmation and complete preflight."""
-    anchor, _ = preflight(editor, motions)
-    preview(editor, motions)
-    print("Board EMPTY; arm supported; clear the rack and ceiling.")
-    print("Start with the arm ALREADY at @sweep_home. No automatic homing.")
-    print("Stop releases torque. This is NOT a collision-free path planner.")
+def run(editor, motions=MOTIONS, *, continuous=False, speed=DEFAULT_SPEED,
+        acceleration=DEFAULT_ACCELERATION):
+    """Play each move and its exact reverse; one snapshot per out-and-back."""
+    speed, acceleration = validate_playback_settings(speed, acceleration)
+    routes = preflight(editor, motions)
+    _show_plan(routes, speed=speed, acceleration=acceleration)
+    print("Check clearance to the first saved pose of each recording.")
+    print("Stop = Space/Q/Esc/Ctrl+C; stopping releases torque, so support the arm.")
     expected = "CONTINUOUS" if continuous else "RUN"
-    if input(f"Type {expected} to enable physical sweep, otherwise cancel: ").strip() != expected:
+    if input(f"Type {expected} to start the sweep, otherwise cancel: ").strip() != expected:
         print("Cancelled; no hardware access.")
         return False
+    if speed > 600 or acceleration > 35:
+        if input("High servo speed. Type HIGH to confirm this run: ").strip() != "HIGH":
+            print("High-speed run cancelled; no hardware access.")
+            return False
+    # Catch edits made while the operator was reading the plan or confirming.
+    preflight(editor, motions)
 
     port, handler = editor.connect()
     completed = False
@@ -190,48 +150,44 @@ def run(editor, motions=MOTIONS, *, continuous=False):
         with editor.RawTerminal() as terminal:
             current = editor.read_all(handler)
             editor.validate_competition_target(current)
-            if max_arm_delta(editor, current, anchor) > HOME_TOLERANCE:
-                raise RuntimeError(
-                    f"Arm not at @{HOME} (>{HOME_TOLERANCE} ticks away). "
-                    "Stopped before enabling torque. Position it manually and retry.")
-            # Hold measured pose first; never jump straight to another route.
-            editor.move_all_sync(handler, current, speed=300, acceleration=20)
+            if editor.stopped(terminal):
+                return False
+            # Hold the measured pose before enabling torque, as in normal playback.
+            editor.move_all_sync(handler, current, speed=DEFAULT_SPEED,
+                                 acceleration=DEFAULT_ACCELERATION)
             if editor.stopped(terminal):
                 return False
             editor.enable_all_torque(handler)
 
-            for visit, cell in enumerate(ROUND_TRIP, 1):
-                # Values are LIVE across visits, but frozen during each out/back leg.
-                if home_pose(editor) != anchor:
-                    raise RuntimeError("Home bookmark changed mid-sweep. Stopping.")
-                route = read_route(editor, cell, anchor, motions)
-                steps = [(i, route[i]) for i in range(1, len(route))]
-                steps += [(i, route[i]) for i in range(len(route)-2, -1, -1)]
-                print(f"\r\nVISIT {visit}/{len(ROUND_TRIP)}: {cell.upper()} via @{HOME}", flush=True)
-                for index, target in steps:
+            for visit, cell in enumerate(ORDER, 1):
+                if editor.stopped(terminal):
+                    return False
+                # Resolve current file/bookmarks ONCE for both directions of this cell.
+                route = read_route(editor, cell, motions)
+                steps = round_trip_steps(route)
+                indices = list(range(len(route))) + list(range(len(route) - 2, -1, -1))
+                print(f"\r\n{visit}/9: {cell}m FORWARD then SAME PATH REVERSE", flush=True)
+                for step, (index, target) in enumerate(zip(indices, steps)):
                     if editor.stopped(terminal):
                         return False
-                    # Keep the gripper at its measured START position: no grabbing.
-                    target = dict(target, gripper=current["gripper"])
-                    before = editor.read_all(handler)
-                    if max_arm_delta(editor, before, target) > MAX_JOINT_STEP:
-                        raise RuntimeError(f"{cell.upper()} point #{index+1}: "
-                                           "unexpected live joint jump. Stopping.")
-                    if not continuous and not await_enter(
-                            terminal, f"{cell.upper()} point {index+1}/{len(route)}"):
+                    direction = "forward" if step < len(route) else "reverse"
+                    label = f"{cell}m {direction}: waypoint {index + 1}/{len(route)}"
+                    if not continuous and not await_enter(terminal, label):
                         return False
                     if editor.stopped(terminal):
                         return False
-                    editor.move_all_sync(handler, target, speed=300, acceleration=20)
+                    print(f"\r\n{label}", flush=True)
+                    editor.move_for_playback(handler, dict(target), speed, acceleration)
                     if not editor.wait_move(handler, terminal):
                         return False
                     measured = editor.read_all(handler)
+                    editor.validate_competition_target(measured)
                     if max_arm_delta(editor, measured, target) > ARRIVAL_TOLERANCE:
                         raise RuntimeError(
-                            f"{cell.upper()} point #{index+1}: arm did not reach requested pose. "
+                            f"{label}: arm did not reach requested pose. "
                             "Stopped without starting the next move.")
             completed = True
-        print("\nRound trip finished at @sweep_home. Torque remains on.")
+        print(f"\nSweep finished: all nine moves reversed; holding {ORDER[-1]}m waypoint 1.")
         return True
     finally:
         try:
@@ -243,100 +199,81 @@ def run(editor, motions=MOTIONS, *, continuous=False):
 
 
 def audit_existing(editor, motions=MOTIONS):
-    """READ-ONLY audit of actual c#r#p recordings; no path is executed.
-
-    Shows what would happen if software jumped directly between final square
-    poses. Large tick jumps are suspicious but small ones DO NOT prove clearance.
-    """
-    print("EXISTING SQUARE-PLACEMENT ROUTE AUDIT (no hardware connection)")
-    print("Checks live local c#r#p.json paths, not the new live_c#r# teaching routes.")
-    endpoints = {}
-    flagged = 0
+    """Report the installed move recordings without writing or connecting."""
+    print("SAVED c#r#m ROUTE AUDIT (no hardware connection)")
+    routes, flagged = {}, 0
     for cell in ORDER:
-        path = motions / f"{cell}p.json"
-        if not path.is_file():
-            print(f"  {cell.upper()}: MISSING {path.name}")
-            flagged += 1
-            continue
         try:
-            description = str(json.loads(path.read_text(encoding="utf-8")).get("description", ""))
-            _, poses = editor.wp.load_sequence(path)
-            if not poses:
-                raise ValueError("empty route")
-            for point in poses:
-                editor.validate_competition_target(point)
-            largest = max(
-                (max_arm_delta(editor, a, b) for a, b in zip(poses, poses[1:])),
-                default=0,
-            )
-            warning = " [LARGE IN-ROUTE JUMP]" if largest > MAX_JOINT_STEP else ""
-            if any(word in description.upper() for word in
-                   ("SIMULATION", "NOT CLEARED", "UNVERIFIED")):
-                warning += " [NOT VERIFIED FOR HARDWARE]"
-            if warning:
-                flagged += 1
-            print(f"  {cell.upper()}: {len(poses)} poses; largest joint step "
-                  f"{largest} ticks{warning}")
-            endpoints[cell] = poses[-1]
-        except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
-            print(f"  {cell.upper()}: INVALID: {exc}")
+            route = read_route(editor, cell, motions)
+            routes[cell] = route
+            largest = max(max_arm_delta(editor, a, b)
+                          for a, b in zip(route, route[1:]))
+            print(f"  {cell}m: {len(route)} saved points; "
+                  f"{2 * len(route) - 1} forward/reverse targets; "
+                  f"largest recorded joint step {largest} ticks")
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+            print(f"  {cell}m: INVALID: {exc}")
             flagged += 1
-
-    links = 0
-    for start, end in zip(ROUND_TRIP, ROUND_TRIP[1:]):
-        if start in endpoints and end in endpoints:
-            delta = max_arm_delta(editor, endpoints[start], endpoints[end])
-            if delta > MAX_JOINT_STEP:
-                links += 1
-                print(f"  DIRECT {start.upper()} -> {end.upper()}: {delta} ticks "
-                      "[LARGE UNPLANNED JOINT JUMP]")
-    print(f"Flagged square recordings: {flagged}/9; "
-          f"large direct-endpoint transitions: {links}.")
-    print("These jumps are HYPOTHETICAL if software moves endpoint-to-endpoint. "
-          "No measured ceiling height, collision model or physical path verification exists.")
-    return {"flagged_routes": flagged, "large_direct_links": links,
-            "square_count": len(endpoints)}
+    for previous, following in zip(ORDER, ORDER[1:]):
+        if previous in routes and following in routes:
+            delta = max_arm_delta(editor, routes[previous][0], routes[following][0])
+            print(f"  {previous}m start -> {following}m start: {delta} ticks")
+    print(f"Valid move recordings: {len(routes)}/9; invalid or missing: {flagged}.")
+    return {"flagged_routes": flagged, "square_count": len(routes)}
 
 
-def menu():
+def menu(*, speed=DEFAULT_SPEED, acceleration=DEFAULT_ACCELERATION):
+    speed, acceleration = validate_playback_settings(speed, acceleration)
     editor = load_editor()
-    print("\nLIVE 9-square test: A audit existing places, I templates, P preview, R guided run, Q back")
+    print("\nSAVED MOVE SWEEP: c1r1m + reverse, c1r2m + reverse, ... c3r3m + reverse")
+    print("C Continuous | R Guided (Enter per point) | P Preview | A Audit | Q Back")
     choice = input("sweep> ").strip().lower()
     if choice == "a":
         audit_existing(editor)
-    elif choice == "i":
-        initialize_routes(editor)
     elif choice == "p":
-        preview(editor)
-    elif choice == "r":
-        run(editor)
-    elif choice != "q":
-        print("Choose A, I, P, R, or Q.")
+        preview(editor, speed=speed, acceleration=acceleration)
+    elif choice in ("r", "c"):
+        raw_speed = input(f"Arm speed [{speed}]: ").strip()
+        raw_accel = input(f"Acceleration [{acceleration}]: ").strip()
+        run(editor, continuous=choice == "c",
+            speed=int(raw_speed) if raw_speed else speed,
+            acceleration=int(raw_accel) if raw_accel else acceleration)
+    elif choice not in ("q", ""):
+        print("Choose C, R, P, A, or Q.")
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--audit", action="store_true", help="audit existing c#r#p routes, never move arm")
-    mode.add_argument("--init", action="store_true", help="create safe teaching templates (no movement)")
+    mode.add_argument("--audit", action="store_true", help="inspect existing c#r#m recordings")
+    mode.add_argument("--menu", action="store_true", help="open the sweep options")
     mode.add_argument("--run", action="store_true", help="guided physical test, Enter per waypoint")
     mode.add_argument("--continuous", action="store_true",
-                      help="continuous physical test after separate confirmation; use only after guided test")
+                      help="play all nine forward/reverse routes without per-waypoint Enter")
+    parser.add_argument("--speed", type=int, default=DEFAULT_SPEED,
+                        help="arm speed 50..1200 (default 300)")
+    parser.add_argument("--accel", "--acceleration", dest="acceleration", type=int,
+                        default=DEFAULT_ACCELERATION,
+                        help="arm acceleration 1..60 (default 20)")
     args = parser.parse_args(argv)
+    validate_playback_settings(args.speed, args.acceleration)
+    if args.menu:
+        menu(speed=args.speed, acceleration=args.acceleration)
+        return
     editor = load_editor()
     if args.audit:
         audit_existing(editor)
-    elif args.init:
-        initialize_routes(editor)
     elif args.run or args.continuous:
-        run(editor, continuous=args.continuous)
+        run(editor, continuous=args.continuous, speed=args.speed,
+            acceleration=args.acceleration)
     else:
-        preview(editor)
+        preview(editor, speed=args.speed, acceleration=args.acceleration)
 
 
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, ValueError, RuntimeError, TimeoutError, KeyboardInterrupt, EOFError) as exc:
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError, TimeoutError,
+            KeyboardInterrupt, EOFError) as exc:
         print(f"\nSweep stopped: {exc}")
         raise SystemExit(1)
