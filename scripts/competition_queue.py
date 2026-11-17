@@ -199,6 +199,14 @@ def build_motion_catalog(routes, load_sequence, validate_target, *, report=print
         try:
             if path.suffix.lower() != '.json':
                 raise ValueError('Not a saved JSON waypoint sequence')
+            # Old mock/simulated motion files must not masquerade as verified
+            # captures just because their register values happen to be in range.
+            description = str(data.get('description', '')).upper()
+            unsafe_tags = ('SIMULATION ONLY', 'NOT CLEARED FOR',
+                           'UNVERIFIED', 'SIMULATION USE ONLY')
+            if any(tag in description for tag in unsafe_tags) and not data.get('hardware_verified'):
+                raise ValueError('simulation-only/unverified motion; teach and verify '
+                                 'the route before marking hardware_verified')
             _, points = load_sequence(path)
             if not points:
                 raise ValueError('Sequence has no waypoints')
@@ -491,11 +499,14 @@ def wait_step(handler, terminal, manager, previous, current, following,
 def playback(catalog, plan, profile, *, connect, read_all, enable_all_torque,
              disable_all_torque, terminal_class, settings, check_result,
              gripper_profile='normal', gamepad=None, report=print,
-             clock=time.monotonic, sleep=time.sleep):
+             finish_after_queue=False, clock=time.monotonic, sleep=time.sleep):
     """Execute editable pending queue. Motor commands stay in this one thread."""
     resolve_speed_profile(profile)
     resolve_speed_profile(gripper_profile, gripper=True)
     manager = InputManager(plan, report, gamepad=gamepad)
+    # Quick macro playback exits when its pre-input queue finishes. The legacy
+    # live-edit queue keeps listening for additions until E is pressed.
+    manager.end_after_queue = bool(finish_after_queue)
     port, handler = connect()
     completed = False
     enabled = False
