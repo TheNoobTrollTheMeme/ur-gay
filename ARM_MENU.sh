@@ -14,6 +14,7 @@ Usage: arm [command] [arguments]
        arm 7               read-only raw debug capture (torque OFF)
        arm board           terminal arm board / macro maker
        arm comp            QUICK competition pseudo-GUI (also: comp)
+       arm trayref         editable TRAY REFERENCE, no motion changes
        arm comp grab1 c1r1p --speed 500 --accel 25
        arm comp --preset opener  replay named competition macro
        arm legacycomp      old competition / Joy-Con queue editor
@@ -202,6 +203,7 @@ dispatch() {
         b|board|macro|macros) run_script scripts/arm_board.py --terminal "$@" ;;
         c|competition|queue|comp|quick|macrosetter) run_script scripts/competition_quick.py "$@" ;;
         k|legacycomp|oldcomp) run_script6_function competition_placements ;;
+        v|trayref|tray-reference|reftray) run_script scripts/competition_quick.py --tray "$@" ;;
         m|remap|mapping|tray) run_script scripts/arm_board.py --remap ;;
         a|attack) run_script scripts/06_full_live_attack.py "$@" ;;
         t|test|sweep|roundtrip|round-trip) run_script scripts/06_live_square_sweep.py "$@" ;;
@@ -232,6 +234,7 @@ menu() {
   5  Waypoint record & playback   M  Tray / winning line remap
                                   A  Full live square attack
                                   K  Old COMP with Joy-Con
+                                  V  Tray reference (view/edit)
                                   T  Live 9-square round-trip test
                                   E  Edit recorded waypoints
                                   X  Batch-paste bookmark coordinate
