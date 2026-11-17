@@ -305,22 +305,24 @@ def interactive(editor=None, *, path=PRESETS):
             print(f"Not applied: {exc}")
 
 
-def launch(editor=None, *, path=PRESETS, force_text=False, force_tui=False):
+def launch(editor=None, *, path=PRESETS, force_text=False, force_tui=False, start_tray=False):
     """Use terminal pseudo-GUI by default; plain text fallback without TTY."""
     if editor is None:
         editor = editor_module()
     is_terminal = (sys.stdin.isatty() and sys.stdout.isatty()
                    and os.environ.get("TERM", "") not in ("", "dumb"))
     if force_text:
+        if start_tray:
+            raise ValueError("Tray reference editor requires a pseudo-GUI TTY.")
         return interactive(editor, path=path)
     if not is_terminal:
-        if force_tui:
+        if force_tui or start_tray:
             raise RuntimeError("Terminal pseudo-GUI requires a TTY (SSH with -t).")
         print("No interactive terminal found; using plain COMP editor.")
         return interactive(editor, path=path)
     try:
         import competition_tui
-        macro = competition_tui.launch(editor, path=path)
+        macro = competition_tui.launch(editor, path=path, start_tray=start_tray)
     except (OSError, ImportError) as exc:
         if force_tui:
             raise
@@ -346,6 +348,7 @@ def main(argv=None):
     view = parser.add_mutually_exclusive_group()
     view.add_argument("--tui", action="store_true", help="require full-screen SSH terminal pseudo-GUI")
     view.add_argument("--text", action="store_true", help="use original typed quick editor")
+    parser.add_argument("--tray", action="store_true", help="open reference-only six-slot tray screen")
     args = parser.parse_args(argv)
     if sum(bool(x) for x in (args.preset, args.repeat, bool(args.motions))) > 1:
         parser.error("Choose saved --preset, --repeat, OR direct motion names.")
@@ -358,8 +361,10 @@ def main(argv=None):
         show_catalog(catalog, labels, limit=None)
         print("Presets: " + (", ".join(sorted(store["presets"])) or "(none)"))
         return
+    if args.tray and (args.motions or args.preset or args.repeat or args.dry_run or args.text):
+        parser.error("--tray opens the interactive visual reference screen only.")
     if not (args.motions or args.preset or args.repeat) and not args.dry_run:
-        return launch(editor, force_text=args.text, force_tui=args.tui)
+        return launch(editor, force_text=args.text, force_tui=args.tui, start_tray=args.tray)
     if args.preset:
         try:
             macro = store["presets"][args.preset.lower()]
