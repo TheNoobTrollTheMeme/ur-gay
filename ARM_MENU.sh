@@ -13,7 +13,10 @@ Usage: arm [command] [arguments]
        arm 6               custom live grid / waypoint editor
        arm 7               read-only raw debug capture (torque OFF)
        arm board           terminal arm board / macro maker
-       arm competition     direct competition queue editor
+       arm comp            QUICK competition / macro setter (also: comp)
+       arm comp grab1 c1r1p --speed 500 --accel 25
+       arm comp --preset opener  replay named competition macro
+       arm legacycomp      old competition / Joy-Con queue editor
        arm remap           offline tray / winning-line remapper
        arm attack          full live square attack selector
        arm sweep           9-square live forward/back diagnostic
@@ -37,6 +40,11 @@ install_launcher() {
         cp -- "${BASH_SOURCE[0]}" "$INSTALL_PATH" || return 1
     fi
     chmod 0755 -- "$INSTALL_PATH" || return 1
+    cat > "$HOME/.local/bin/comp" <<'EOF'
+#!/usr/bin/env bash
+exec "$HOME/.local/bin/arm" comp "$@"
+EOF
+    chmod 0755 -- "$HOME/.local/bin/comp" || return 1
     if ! grep -Fq '# ENGG1101 arm launcher PATH' "$HOME/.bashrc" 2>/dev/null; then
         {
             printf '\n# ENGG1101 arm launcher PATH\n'
@@ -192,7 +200,8 @@ dispatch() {
         6|06|grid|script6|mine) run_script scripts/06_live_grid_tool.py "$@" ;;
         7|07|debug|capture) ask_torque_off && run_script scripts/07_raw_debug_capture.py "$@" ;;
         b|board|macro|macros) run_script scripts/arm_board.py --terminal "$@" ;;
-        c|competition|queue) run_script6_function competition_placements ;;
+        c|competition|queue|comp|quick|macrosetter) run_script scripts/competition_quick.py "$@" ;;
+        k|legacycomp|oldcomp) run_script6_function competition_placements ;;
         m|remap|mapping|tray) run_script scripts/arm_board.py --remap ;;
         a|attack) run_script scripts/06_full_live_attack.py "$@" ;;
         t|test|sweep|roundtrip|round-trip) run_script scripts/06_live_square_sweep.py "$@" ;;
@@ -219,9 +228,10 @@ menu() {
   1  Read current positions       6  Live grid / waypoint editor
   2  Move to raw servo values     7  Raw debug capture
   3  Move using joint angles      B  Board / macro maker
-  4  Timestamp motions            C  Competition queue
+  4  Timestamp motions            C  Competition macros (quick)
   5  Waypoint record & playback   M  Tray / winning line remap
                                   A  Full live square attack
+                                  K  Old COMP with Joy-Con
                                   T  Live 9-square round-trip test
                                   E  Edit recorded waypoints
                                   X  Batch-paste bookmark coordinate
