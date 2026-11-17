@@ -829,7 +829,7 @@ def main():
         parser.error('--auto, --dry-run, --speed and --acceleration require --sequence NAME')
     refresh_attacks()
     while True:
-        answer = input('\n1 Live record/replace/remove  2 Random squares  3 Attack square  4 Sync ALL attacks  5 Copy current values  6 Auto grid  7 Run saved sequence  8 Competition: all motions  9 Live square sweep  Q Quit: ').strip().lower()
+        answer = input('\n1 Live record/replace/remove  2 Random squares  3 Attack square  4 Sync ALL attacks  5 Copy current values  6 Auto grid  7 Run saved sequence  8 Quick COMP macros  9 Live square sweep  10 Old COMP / Joy-Con  Q Quit: ').strip().lower()
         try:
             if answer == 'q':
                 return
@@ -847,6 +847,9 @@ def main():
             elif answer == '6':
                 test_grid(auto=True)
             elif answer == '8':
+                from competition_quick import interactive
+                interactive()
+            elif answer == '10':
                 competition_placements()
             elif answer == '9':
                 spec_sweep = importlib.util.spec_from_file_location(
