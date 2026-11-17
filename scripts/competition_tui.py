@@ -7,11 +7,13 @@ takes over the terminal for its hardware-stop listener.
 from __future__ import annotations
 
 import curses
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 import re
 
 import competition_quick as quick
+import comp_tray_reference as reference
 
 
 @dataclass
@@ -19,12 +21,18 @@ class Selection:
     pane: int = 0  # 0 = available motions, 1 = staged queue
     motion: int = 0
     queue: int = 0
+    tray: int = 1
 
 
 class CompetitionState:
-    def __init__(self, catalog, labels, aliases, store):
+    def __init__(self, catalog, labels, aliases, store, *,
+                 reference_path=reference.REFERENCE_PATH):
         self.catalog, self.labels, self.aliases = catalog, labels, aliases
         self.store = store
+        self.reference_path = Path(reference_path)
+        self.tray = reference.load_reference(self.reference_path)
+        self.tray_saved = deepcopy(self.tray)
+        self.tray_open = False
         self.queue = []
         self.speed = store.get("speed", 300)
         self.accel = store.get("accel", 20)
@@ -33,6 +41,46 @@ class CompetitionState:
         self.filter_text = ""
         self.status = "Ready. Choose a recording and press Enter to queue."
         self.active_macro = None
+
+    @property
+    def tray_dirty(self):
+        return self.tray != self.tray_saved
+
+    @property
+    def selected_slot(self):
+        return reference.slot_at(self.tray, self.select.tray)
+
+    def select_tray_slot(self, number):
+        if number not in range(1, 7):
+            raise ValueError("Choose physical slot 1..6.")
+        self.select.tray = number
+
+    def edit_tray(self, **fields):
+        """Staged reference labels ONLY: no modification to pickup configuration."""
+        self.tray = reference.edit_reference(self.tray, self.select.tray, **fields)
+        self.status = f"REFERENCE ONLY: slot {self.select.tray} edited, not saved."
+
+    def cycle_tray_block(self):
+        choices = reference.BLOCKS
+        current = self.selected_slot["block"]
+        self.edit_tray(block=choices[(choices.index(current) + 1) % len(choices)])
+
+    def cycle_tray_zone(self):
+        choices = reference.ZONES
+        current = self.selected_slot["zone"]
+        self.edit_tray(zone=choices[(choices.index(current) + 1) % len(choices)])
+
+    def save_tray_reference(self):
+        path, backup = reference.save_reference(self.tray, self.reference_path)
+        self.tray_saved = deepcopy(self.tray)
+        self.status = "Saved reference labels to " + path.name + (
+            f"; backup {backup.name}" if backup else ""
+        ) + ". Motion scripts unchanged."
+
+    def discard_tray_reference(self):
+        self.tray = reference.load_reference(self.reference_path)
+        self.tray_saved = deepcopy(self.tray)
+        self.status = "Reference edits discarded. Physical tray configuration unchanged."
 
     @property
     def shown(self):
@@ -226,11 +274,63 @@ def draw(screen, state):
         curses.A_BOLD, width=w-split-4)
     bar(screen, h-4, 0, w, "-")
     put(screen, h-3, 1, "TAB pane | arrows select | ENTER add | DEL remove | [/] reorder | / search")
-    put(screen, h-2, 1, "S save | O open | F speed | V preview | G refresh | R RUN | ? help | Q quit")
+    put(screen, h-2, 1, "S save | O open | F speed | T tray ref | R RUN | V preview | ? help | Q quit")
     put(screen, h-1, 1, state.status,
         warn_attr if ("NOT" in state.status or "Error" in state.status
                       or "invalid" in state.status) else mark_attr)
     screen.refresh()
+
+
+def draw_tray(screen, state):
+    """Three-tray sketch, solely for the operator's visual reference."""
+    screen.erase()
+    h, w = screen.getmaxyx()
+    if h < 18 or w < 72:
+        put(screen, 1, 2, f"Terminal too small ({w}x{h}); need 72x18.")
+        put(screen, 3, 2, "Resize or press T / Esc to return.")
+        screen.refresh()
+        return
+    try:
+        heading = curses.color_pair(1) | curses.A_BOLD
+        focused = curses.A_REVERSE | curses.A_BOLD
+    except curses.error:
+        heading = curses.A_BOLD
+        focused = curses.A_REVERSE
+    put(screen, 0, 2, "COMP // TRAY REFERENCE (NO MOTOR CONTROL)", heading)
+    put(screen, 1, 2, "Visual notes only. Does not modify tray_mapping.json, grab motions or macros.")
+    bar(screen, 2, 0, w, "=")
+    width = (w - 4) // 3
+    for col, zone in enumerate(reference.ZONES):
+        x = 2 + col * width
+        put(screen, 4, x, f"[ {zone} ]", heading, width=width-2)
+        for n, slot in enumerate(sorted(
+                (slot for slot in state.tray["slots"] if slot["zone"] == zone),
+                key=lambda slot: slot["slot"])):
+            y = 6 + n * 3
+            if y >= h-5:
+                break
+            selected = slot["slot"] == state.select.tray
+            line = ((">" if selected else " ") + f" {slot['slot']} "
+                    + f"{slot['block']:<9} {slot['position']}")
+            put(screen, y, x, line, focused if selected else 0,
+                width=width-2)
+            put(screen, y+1, x+2, slot["note"] or "(no note)",
+                curses.A_DIM, width=width-4)
+    put(screen, h-5, 2, "REFERENCE FILE: comp_tray_reference.json "
+        + ("[UNSAVED EDITS]" if state.tray_dirty else "[SAVED/DEFAULT]"),
+        heading)
+    bar(screen, h-4, 0, w)
+    put(screen, h-3, 1, "1..6 select | Up/Down navigate | B block | Z tray zone | P position | N note")
+    put(screen, h-2, 1, "S save ref | D discard changes | T/Esc back to COMP | ? help")
+    put(screen, h-1, 1, state.status)
+    screen.refresh()
+
+
+def draw_active(screen, state):
+    if state.tray_open:
+        draw_tray(screen, state)
+    else:
+        draw(screen, state)
 
 
 def prompt(screen, state, label, *, max_length=60, value=""):
@@ -243,7 +343,7 @@ def prompt(screen, state, label, *, max_length=60, value=""):
         pass
     try:
         while True:
-            draw(screen, state)
+            draw_active(screen, state)
             put(screen, h-1, 1, " " * (w-2))
             put(screen, h-1, 1, f"{label}: {text}  [Enter=OK Esc=cancel]")
             screen.move(h-1, min(w-2, len(label)+len(text)+3))
@@ -267,7 +367,7 @@ def prompt(screen, state, label, *, max_length=60, value=""):
 def confirm(screen, state, message):
     """No action until explicit Y while in the confirmation panel."""
     while True:
-        draw(screen, state)
+        draw_active(screen, state)
         h, w = screen.getmaxyx()
         put(screen, h-1, 1, " " * (w-2))
         put(screen, h-1, 1, message + "   [Y=yes / N=cancel]")
@@ -359,6 +459,9 @@ def help_overlay(screen, state):
         "F: set ARM speed once (gripper stays at 300/20)",
         "/: filter by motion name  |  V: preview waypoint count",
         "G: refresh local motion catalog  |  C: clear queue",
+        "T: visual six-slot tray reference (NEVER affects motor commands)",
+        "Tray screen: 1..6 select slot | B block | Z zone | P position | N note",
+        "Tray screen: S saves independent reference | D discards | T returns",
         "R: confirm and RUN queue  |  Q / Esc: quit",
         "No mouse/X display required. No live edits while moving.",
         "Space, Q and Esc STOP motor playback after GUI closes.",
@@ -379,7 +482,8 @@ def help_overlay(screen, state):
         return
 
 
-def app(screen, editor, *, path=quick.PRESETS):
+def app(screen, editor, *, path=quick.PRESETS,
+        start_tray=False, reference_path=reference.REFERENCE_PATH):
     try:
         curses.curs_set(0)
     except curses.error:
@@ -397,15 +501,56 @@ def app(screen, editor, *, path=quick.PRESETS):
     # Discovery is allowed to print disabled filenames; capture them in a status.
     disabled = []
     catalog, labels, aliases = quick.catalog_for(editor, report=disabled.append)
-    state = CompetitionState(catalog, labels, aliases, quick.load_store(path))
+    state = CompetitionState(catalog, labels, aliases, quick.load_store(path),
+                             reference_path=reference_path)
+    state.tray_open = bool(start_tray)
     if disabled:
         state.status = f"{len(disabled)} unavailable/invalid recordings skipped."
     while True:
-        draw(screen, state)
+        draw_active(screen, state)
         key = screen.getch()
         if key == curses.KEY_RESIZE:
             continue
         try:
+            if state.tray_open:
+                if key in (ord("t"), ord("T"), 27, ord("q"), ord("Q")):
+                    if state.tray_dirty and not confirm(
+                            screen, state, "Discard UNSAVED tray reference edits?"):
+                        state.status = "Save with S or continue editing."
+                    else:
+                        if state.tray_dirty:
+                            state.discard_tray_reference()
+                        state.tray_open = False
+                elif key in (curses.KEY_UP, ord("k")):
+                    state.select_tray_slot(max(1, state.select.tray-1))
+                elif key in (curses.KEY_DOWN, ord("j")):
+                    state.select_tray_slot(min(6, state.select.tray+1))
+                elif key in tuple(ord(str(n)) for n in range(1, 7)):
+                    state.select_tray_slot(int(chr(key)))
+                elif key in (ord("b"), ord("B")):
+                    state.cycle_tray_block()
+                elif key in (ord("z"), ord("Z")):
+                    state.cycle_tray_zone()
+                elif key in (ord("p"), ord("P")):
+                    value = prompt(screen, state, "Position label (1..32)",
+                                   max_length=32, value=state.selected_slot["position"])
+                    if value is not None:
+                        state.edit_tray(position=value)
+                elif key in (ord("n"), ord("N")):
+                    value = prompt(screen, state, "Note (0..72)",
+                                   max_length=72, value=state.selected_slot["note"])
+                    if value is not None:
+                        state.edit_tray(note=value)
+                elif key in (ord("s"), ord("S")):
+                    state.save_tray_reference()
+                elif key in (ord("d"), ord("D")):
+                    if not state.tray_dirty or confirm(
+                            screen, state, "Discard unsaved reference edits?"):
+                        state.discard_tray_reference()
+                elif key == ord("?"):
+                    help_overlay(screen, state)
+                # All tray events handled here; none can queue/play motors.
+                continue
             if key in (ord("q"), ord("Q"), 27):
                 return None
             if key in (9, curses.KEY_LEFT, curses.KEY_RIGHT):
@@ -434,6 +579,10 @@ def app(screen, editor, *, path=quick.PRESETS):
                 settings = choose_speed(screen, state)
                 if settings is not None:
                     state.change_speed(*settings, path=path)
+            elif key in (ord("t"), ord("T")):
+                state.tray_open = True
+                state.status = ("REFERENCE ONLY: edit physical slot labels. "
+                                "No influence on playback or pickup mapping.")
             elif key in (ord("s"), ord("S")):
                 name = prompt(screen, state, "Macro name")
                 if name:
@@ -469,6 +618,9 @@ def app(screen, editor, *, path=quick.PRESETS):
             state.status = "Error: " + str(exc)
 
 
-def launch(editor, *, path=quick.PRESETS):
+def launch(editor, *, path=quick.PRESETS, start_tray=False,
+           reference_path=reference.REFERENCE_PATH):
     """Render curses editor; return selected immutable macro (or None)."""
-    return curses.wrapper(lambda screen: app(screen, editor, path=path))
+    return curses.wrapper(lambda screen: app(
+        screen, editor, path=path, start_tray=start_tray,
+        reference_path=reference_path))
