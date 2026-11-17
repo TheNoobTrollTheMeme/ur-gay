@@ -105,12 +105,9 @@ def atomic_store(data, path=PRESETS):
 
 def catalog_for(editor, *, report=print):
     """Re-read actual recordings BEFORE each play, without sending commands."""
-    editor.refresh_attacks()
-    from pose_bookmarks import list_bookmarks
-    return editor.competition.build_motion_catalog(
-        editor.wp.find_sequences(), editor.wp.load_sequence,
-        editor.validate_competition_target, report=report,
-        bookmarks=list_bookmarks(editor.BOOKMARK_FILE, editor.settings.JOINT_NAMES))
+    from competition_menu_data import build_snapshot
+    snapshot = build_snapshot(editor, report=report)
+    return snapshot.catalog, snapshot.labels, snapshot.aliases
 
 
 def resolve_queue(actions, catalog, labels, aliases):
@@ -273,7 +270,7 @@ def interactive(editor=None, *, path=PRESETS):
             elif op in ("d", "del") and len(args) == 1:
                 index = int(args[0])
                 if index < 1 or index > len(names):
-                    raise ValueError("Remove index must refer to a queued motion.")
+                    raise ValueError("Remove index must refer to queued motion.")
                 removed = names.pop(index-1)
                 print("Removed " + removed)
             elif op == "m" and len(args) == 2:
@@ -321,8 +318,8 @@ def launch(editor=None, *, path=PRESETS, force_text=False, force_tui=False, star
         print("No interactive terminal found; using plain COMP editor.")
         return interactive(editor, path=path)
     try:
-        import competition_tui
-        macro = competition_tui.launch(editor, path=path, start_tray=start_tray)
+        import competition_menu
+        macro = competition_menu.launch(editor, path=path, start_tray=start_tray)
     except (OSError, ImportError) as exc:
         if force_tui:
             raise

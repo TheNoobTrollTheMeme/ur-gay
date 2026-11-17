@@ -103,6 +103,8 @@ scripts=(
     06_live_grid_tool.py
     competition_quick.py
     competition_tui.py
+    competition_menu.py
+    competition_menu_data.py
     comp_tray_reference.py
     06_live_square_sweep.py
     pose_bookmarks.py
@@ -175,7 +177,7 @@ echo
 cd -- "$project"
 case "$launch_mode" in
     --comp)
-        echo "Opening QUICK COMP pseudo-GUI (SSH keyboard interface; no desktop required)."
+        echo "Opening COMP MENU V2 (H show/hide, A all entries, W winning lines)."
         python3 scripts/competition_quick.py "${comp_args[@]}"
         ;;
     --menu)
