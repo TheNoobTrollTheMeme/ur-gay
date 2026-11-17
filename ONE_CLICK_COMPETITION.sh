@@ -32,8 +32,8 @@ if [[ "$launch_mode" == "--install-desktop" ]]; then
 [Desktop Entry]
 Type=Application
 Name=ROBOARM Competition
-Comment=Pull code, safely back up and deploy scripts, open Script 6 menu
-Exec=/usr/bin/env ONE_CLICK_PAUSE=1 /bin/bash "$quoted_path/ONE_CLICK_COMPETITION.sh"
+Comment=Pull latest GitHub code and open COMP keyboard pseudo-GUI
+Exec=/usr/bin/env ONE_CLICK_PAUSE=1 /bin/bash "$quoted_path/ONE_CLICK_COMPETITION.sh" --comp
 Terminal=true
 Icon=applications-engineering
 Categories=Education;Development;
@@ -102,6 +102,7 @@ scripts=(
     05_bookmark_compat.py
     06_live_grid_tool.py
     competition_quick.py
+    competition_tui.py
     06_live_square_sweep.py
     pose_bookmarks.py
     batch_paste_bookmark_joint.py
@@ -173,7 +174,7 @@ echo
 cd -- "$project"
 case "$launch_mode" in
     --comp)
-        echo "Opening QUICK Competition Mode (macro editor, named presets, speed)."
+        echo "Opening QUICK COMP pseudo-GUI (SSH keyboard interface; no desktop required)."
         python3 scripts/competition_quick.py "${comp_args[@]}"
         ;;
     --menu)
@@ -190,7 +191,7 @@ case "$launch_mode" in
         python3 scripts/arm_board.py --terminal
         ;;
     *)
-        echo "Opening Script 6. Choose option 8 for Competition Mode."
+        echo "Opening Script 6. Choose option 8 for Quick COMP pseudo-GUI."
         echo "No robot motion occurs until you explicitly start playback."
         python3 scripts/06_live_grid_tool.py
         ;;
