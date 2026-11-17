@@ -56,9 +56,12 @@ EOF
     exit 0
 fi
 
-if [[ $# -gt 1 || ( -n "$launch_mode" && "$launch_mode" != "--remap" &&
-                    "$launch_mode" != "--macro-board" && "$launch_mode" != "--menu" ) ]]; then
-    echo "Usage: bash ONE_CLICK_COMPETITION.sh [--install-desktop|--remap|--macro-board|--menu]" >&2
+if [[ "$launch_mode" == "--comp" ]]; then
+    shift
+    comp_args=("$@")
+elif [[ $# -gt 1 || ( -n "$launch_mode" && "$launch_mode" != "--remap" &&
+                       "$launch_mode" != "--macro-board" && "$launch_mode" != "--menu" ) ]]; then
+    echo "Usage: bash ONE_CLICK_COMPETITION.sh [--install-desktop|--remap|--macro-board|--menu|--comp [args...]]" >&2
     exit 2
 fi
 
@@ -98,6 +101,7 @@ fi
 scripts=(
     05_bookmark_compat.py
     06_live_grid_tool.py
+    competition_quick.py
     06_live_square_sweep.py
     pose_bookmarks.py
     batch_paste_bookmark_joint.py
@@ -160,12 +164,18 @@ done
 echo
 echo "Installed arm folder: $project"
 echo "Updated $changed script(s). Recorded motions were NOT changed."
+# Keep the short 'comp' command fresh even if user launches via the old shortcut.
+bash "$repo/ARM_MENU.sh" --install
 if [[ -d "$backup_dir" ]]; then
     echo "Original installed scripts backed up to: $backup_dir"
 fi
 echo
 cd -- "$project"
 case "$launch_mode" in
+    --comp)
+        echo "Opening QUICK Competition Mode (macro editor, named presets, speed)."
+        python3 scripts/competition_quick.py "${comp_args[@]}"
+        ;;
     --menu)
         echo "Refreshing local arm command, then opening the combined script menu."
         bash "$repo/ARM_MENU.sh" --install
