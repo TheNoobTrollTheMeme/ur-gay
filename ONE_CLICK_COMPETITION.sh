@@ -103,6 +103,7 @@ scripts=(
     06_live_grid_tool.py
     competition_quick.py
     competition_tui.py
+    comp_tray_reference.py
     06_live_square_sweep.py
     pose_bookmarks.py
     batch_paste_bookmark_joint.py
