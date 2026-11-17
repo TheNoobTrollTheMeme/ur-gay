@@ -8,6 +8,7 @@ INSTALL_PATH="$HOME/.local/bin/arm"
 help_text() {
     cat <<'EOF'
 Usage: arm [command] [arguments]
+       menu                full arm launcher shortcut (works from any folder)
        arm                 interactive menu (works over SSH)
        arm 1..5            Kelvin arm Scripts 01..05 (5 supports @bookmarks)
        arm 6               custom live grid / waypoint editor
@@ -42,6 +43,11 @@ install_launcher() {
         cp -- "${BASH_SOURCE[0]}" "$INSTALL_PATH" || return 1
     fi
     chmod 0755 -- "$INSTALL_PATH" || return 1
+    cat > "$HOME/.local/bin/menu" <<'EOF'
+#!/usr/bin/env bash
+exec "$HOME/.local/bin/arm" "$@"
+EOF
+    chmod 0755 -- "$HOME/.local/bin/menu" || return 1
     cat > "$HOME/.local/bin/comp" <<'EOF'
 #!/usr/bin/env bash
 exec "$HOME/.local/bin/arm" comp "$@"
@@ -54,8 +60,8 @@ EOF
         } >> "$HOME/.bashrc"
     fi
     echo "Installed: $INSTALL_PATH"
-    echo 'Use: arm 1, arm 6, arm board, or just arm for the full menu.'
-    echo 'New shells will find arm automatically; for this shell run: export PATH="$HOME/.local/bin:$PATH"'
+    echo 'Use: menu for the full launcher, comp for COMP, or arm 6 for Script 6.'
+    echo 'New shells will find menu, arm and comp automatically; for this shell run: export PATH="$HOME/.local/bin:$PATH"'
 }
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "help" ]]; then
