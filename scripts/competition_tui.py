@@ -306,16 +306,17 @@ def draw_tray(screen, state):
         for n, slot in enumerate(sorted(
                 (slot for slot in state.tray["slots"] if slot["zone"] == zone),
                 key=lambda slot: slot["slot"])):
-            y = 6 + n * 3
-            if y >= h-5:
-                break
+            # One line per slot leaves enough room for all six to be in one
+            # reference zone, even on an 18-row SSH terminal.
+            y = 6 + n
             selected = slot["slot"] == state.select.tray
             line = ((">" if selected else " ") + f" {slot['slot']} "
                     + f"{slot['block']:<9} {slot['position']}")
             put(screen, y, x, line, focused if selected else 0,
                 width=width-2)
-            put(screen, y+1, x+2, slot["note"] or "(no note)",
-                curses.A_DIM, width=width-4)
+    note = state.selected_slot["note"] or "(no note)"
+    put(screen, h-6, 2, f"Selected #{state.select.tray} note: {note}",
+        curses.A_DIM)
     put(screen, h-5, 2, "REFERENCE FILE: comp_tray_reference.json "
         + ("[UNSAVED EDITS]" if state.tray_dirty else "[SAVED/DEFAULT]"),
         heading)
