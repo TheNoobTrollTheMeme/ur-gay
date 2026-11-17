@@ -847,8 +847,8 @@ def main():
             elif answer == '6':
                 test_grid(auto=True)
             elif answer == '8':
-                from competition_quick import interactive
-                interactive()
+                from competition_quick import launch
+                launch()
             elif answer == '10':
                 competition_placements()
             elif answer == '9':
