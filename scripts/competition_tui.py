@@ -78,8 +78,14 @@ class CompetitionState:
         self.select.queue = j
         self.status = "Moved " + self.queue[j] + (" up." if step < 0 else " down.")
 
-    def change_speed(self, speed, accel):
-        self.speed, self.accel = quick.validate_speed(speed, accel)
+    def change_speed(self, speed, accel, *, path=None):
+        speed, accel = quick.validate_speed(speed, accel)
+        if path is not None:
+            # Persist just the preference; no waypoint files are altered.
+            new_store = dict(self.store, speed=speed, accel=accel)
+            quick.atomic_store(new_store, path)
+            self.store = new_store
+        self.speed, self.accel = speed, accel
         self.status = f"Arm speed {self.speed}/{self.accel}; gripper remains 300/20."
 
     def preview(self):
@@ -427,7 +433,7 @@ def app(screen, editor, *, path=quick.PRESETS):
             elif key in (ord("f"), ord("F")):
                 settings = choose_speed(screen, state)
                 if settings is not None:
-                    state.change_speed(*settings)
+                    state.change_speed(*settings, path=path)
             elif key in (ord("s"), ord("S")):
                 name = prompt(screen, state, "Macro name")
                 if name:
