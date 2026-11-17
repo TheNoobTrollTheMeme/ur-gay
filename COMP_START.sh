@@ -10,14 +10,22 @@ check_repo() {
     [[ "$origin" == *"TheNoobTrollTheMeme/ur-gay"* ]]
 }
 folder=""
-for candidate in "$PWD" "$HOME/ur-gay" "$HOME/ur gay" \
-                 "$HOME/robot-arm-lab/ur-gay" "$HOME/robot-arm-lab/ur gay" \
-                 "$HOME/robot-arm-lab/STS3215-5DOF-Robot-Arm/ur-gay"; do
-    if check_repo "$candidate"; then
-        folder="$candidate"
-        break
+if [[ -n "${UR_GAY_DIR:-}" ]]; then
+    if ! check_repo "$UR_GAY_DIR"; then
+        echo "ERROR: UR_GAY_DIR must point to the existing ur-gay GitHub clone."
+        exit 1
     fi
-done
+    folder="$UR_GAY_DIR"
+else
+    for candidate in "$PWD" "$HOME/ur-gay" "$HOME/ur gay" \
+                     "$HOME/robot-arm-lab/ur-gay" "$HOME/robot-arm-lab/ur gay" \
+                     "$HOME/robot-arm-lab/STS3215-5DOF-Robot-Arm/ur-gay"; do
+        if check_repo "$candidate"; then
+            folder="$candidate"
+            break
+        fi
+    done
+fi
 if [[ -z "$folder" ]]; then
     folder="$HOME/ur-gay"
     if [[ -e "$folder" ]]; then
