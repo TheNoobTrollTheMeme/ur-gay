@@ -17,8 +17,10 @@ if [[ -n "${UR_GAY_DIR:-}" ]]; then
     fi
     folder="$UR_GAY_DIR"
 else
-    for candidate in "$PWD" "$HOME/ur-gay" "$HOME/ur gay" \
+    for candidate in "$PWD" "$HOME/ur-gay" "$HOME/Ur-gay" \
+                     "$HOME/ur gay" "$HOME/Ur gay" "$HOME/Ur Gay" \
                      "$HOME/robot-arm-lab/ur-gay" "$HOME/robot-arm-lab/ur gay" \
+                     "$HOME/robot-arm-lab/Ur gay" \
                      "$HOME/robot-arm-lab/STS3215-5DOF-Robot-Arm/ur-gay"; do
         if check_repo "$candidate"; then
             folder="$candidate"
