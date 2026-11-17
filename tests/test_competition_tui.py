@@ -18,6 +18,7 @@ class CompTUITests(unittest.TestCase):
         self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / "_competition_presets.json"
+        self.reference_path = Path(self.temp.name) / "comp_tray_reference.json"
         raw = {"2": (cq.Point("grab1", 1, {"base": 2000}),),
                "7": (cq.Point("c1r1m", 1, {"base": 1800}),
                      cq.Point("c1r1p", 1, {"base": 1900})),
@@ -25,7 +26,8 @@ class CompTUITests(unittest.TestCase):
         labels = {"2": "grab1", "7": "c1r1", "10": "grab2"}
         aliases = {v: k for k, v in labels.items()}
         self.state = tui.CompetitionState(raw, labels, aliases,
-                                          quick.load_store(self.path))
+                                          quick.load_store(self.path),
+                                          reference_path=self.reference_path)
 
     def test_cursor_add_remove_reorder(self):
         s = self.state
@@ -90,6 +92,51 @@ class CompTUITests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unavailable"):
             s.load_macro("broken")
         self.assertEqual(s.queue, before)
+
+    def test_tray_layout_can_be_edited_and_saved_without_touching_queue(self):
+        state = self.state
+        self.assertFalse(state.tray_dirty)
+        self.assertEqual(state.selected_slot["block"], "cylinder")
+        state.cycle_tray_block()
+        state.edit_tray(note="Left tray cylinder moved", position="rear-inner")
+        self.assertEqual(state.selected_slot["block"], "trophy")
+        self.assertTrue(state.tray_dirty)
+        self.assertEqual(state.queue, [])
+        state.save_tray_reference()
+        self.assertFalse(state.tray_dirty)
+        self.assertEqual(state.selected_slot["note"], "Left tray cylinder moved")
+        self.assertTrue(self.reference_path.exists())
+        self.assertFalse(self.path.exists())
+        state.select_tray_slot(6)
+        state.cycle_tray_zone()
+        self.assertTrue(state.tray_dirty)
+        state.discard_tray_reference()
+        self.assertFalse(state.tray_dirty)
+        self.assertEqual(state.selected_slot["zone"], "B-right")
+
+    def test_tray_reference_does_not_affect_macro_playback_targets(self):
+        state = self.state
+        state.add_selected()
+        plan_before = state.export_for_run()
+        saved = dict(state.catalog)
+        state.select_tray_slot(1)
+        state.edit_tray(block="empty", note="No block there currently")
+        state.save_tray_reference()
+        self.assertEqual(state.export_for_run(), plan_before)
+        self.assertEqual(state.catalog, saved)
+        self.assertEqual(state.queue, ["grab1"])
+        self.assertEqual(state.selected_slot["block"], "empty")
+
+    def test_tray_reference_rejects_invalid_input_without_changes(self):
+        state = self.state
+        previous = state.tray.copy()
+        with self.assertRaises(ValueError):
+            state.edit_tray(position="")
+        self.assertEqual(state.tray, previous)
+        with self.assertRaises(ValueError):
+            state.edit_tray(servo=9000)
+        self.assertEqual(state.tray, previous)
+        self.assertFalse(self.reference_path.exists())
 
     def test_curses_cancel_leaves_queue_unplayed(self):
         editor = object()
