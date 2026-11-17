@@ -13,7 +13,7 @@ Usage: arm [command] [arguments]
        arm 6               custom live grid / waypoint editor
        arm 7               read-only raw debug capture (torque OFF)
        arm board           terminal arm board / macro maker
-       arm comp            QUICK competition / macro setter (also: comp)
+       arm comp            QUICK competition pseudo-GUI (also: comp)
        arm comp grab1 c1r1p --speed 500 --accel 25
        arm comp --preset opener  replay named competition macro
        arm legacycomp      old competition / Joy-Con queue editor
@@ -228,7 +228,7 @@ menu() {
   1  Read current positions       6  Live grid / waypoint editor
   2  Move to raw servo values     7  Raw debug capture
   3  Move using joint angles      B  Board / macro maker
-  4  Timestamp motions            C  Competition macros (quick)
+  4  Timestamp motions            C  COMP pseudo-GUI + saved macros
   5  Waypoint record & playback   M  Tray / winning line remap
                                   A  Full live square attack
                                   K  Old COMP with Joy-Con
