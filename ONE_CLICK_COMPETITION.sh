@@ -100,6 +100,7 @@ fi
 # Deploy only the linked launcher/playback dependencies; never modify motions/*.json.
 scripts=(
     05_bookmark_compat.py
+    05_waypoint_debug.py
     06_live_grid_tool.py
     competition_quick.py
     competition_tui.py
