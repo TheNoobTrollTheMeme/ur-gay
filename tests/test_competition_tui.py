@@ -69,6 +69,13 @@ class CompTUITests(unittest.TestCase):
         self.assertEqual(s.export_for_run(),
                          {"queue": ["grab1", "c1r1"], "speed": 500, "accel": 25})
 
+    def test_speed_preference_persists_without_starting_arm(self):
+        self.state.change_speed(550, 28, path=self.path)
+        self.assertEqual((self.state.speed, self.state.accel), (550, 28))
+        saved = quick.load_store(self.path)
+        self.assertEqual((saved["speed"], saved["accel"]), (550, 28))
+        self.assertEqual(self.state.queue, [])
+
     def test_invalid_update_is_atomic(self):
         s = self.state
         s.add_selected()
