@@ -132,6 +132,23 @@ class LiveSquareSweepTests(unittest.TestCase):
         self.assertEqual(sweep.ROUND_TRIP[9:], sweep.ORDER[-2::-1])
         self.assertEqual(sweep.ROUND_TRIP[-1], "c1r1")
 
+    def test_read_only_audit_exposes_direct_jump_risks(self):
+        for i, cell in enumerate(sweep.ORDER):
+            endpoint = 1400 if i % 2 else 1000
+            data = {"input_type": "raw", "description": "Local place path",
+                    "points": [
+                        {"input_values": [1000, 1000, 1000, 1000, 1500]},
+                        {"input_values": [endpoint, 1000, 1000, 1000, 1500]},
+                    ]}
+            (self.folder / f"{cell}p.json").write_text(json.dumps(data))
+        previous = {p.name: p.read_text() for p in self.folder.iterdir()}
+        report = sweep.audit_existing(self.editor, self.folder)
+        self.assertEqual(report["square_count"], 9)
+        self.assertGreater(report["large_direct_links"], 0)
+        self.assertGreater(report["flagged_routes"], 0)
+        self.assertEqual({p.name: p.read_text() for p in self.folder.iterdir()}, previous)
+        self.assertEqual(self.editor.connect_calls, 0)
+
     def test_teaching_templates_never_overwrite(self):
         sweep.initialize_routes(self.editor, self.folder)
         created = list(self.folder.glob("live_*.json"))
