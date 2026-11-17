@@ -16,6 +16,7 @@ Usage: arm [command] [arguments]
        arm competition     direct competition queue editor
        arm remap           offline tray / winning-line remapper
        arm attack          full live square attack selector
+       arm sweep           9-square live forward/back diagnostic
        arm joycon          Joy-Con diagnostics (no movement)
        arm edit            jump straight into Script 6 recording editor
        arm paste            batch-paste ONE bookmark joint into chosen waypoints
@@ -194,6 +195,7 @@ dispatch() {
         c|competition|queue) run_script6_function competition_placements ;;
         m|remap|mapping|tray) run_script scripts/arm_board.py --remap ;;
         a|attack) run_script scripts/06_full_live_attack.py "$@" ;;
+        t|test|sweep|roundtrip|round-trip) run_script scripts/06_live_square_sweep.py "$@" ;;
         j|joycon|joy) run_script scripts/smash_joycon.py --diagnose ;;
         e|edit|record) run_script6_function record ;;
         x|paste|batch|jointpaste) run_script scripts/batch_paste_bookmark_joint.py "$@" ;;
@@ -220,6 +222,7 @@ menu() {
   4  Timestamp motions            C  Competition queue
   5  Waypoint record & playback   M  Tray / winning line remap
                                   A  Full live square attack
+                                  T  Live 9-square round-trip test
                                   E  Edit recorded waypoints
                                   X  Batch-paste bookmark coordinate
                                   P  Bookmark manager (capture/list)
