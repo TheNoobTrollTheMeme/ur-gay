@@ -171,6 +171,27 @@ class HardwareChecks(unittest.TestCase):
         self.assertIn("closed", statuses)
         self.assertTrue(any("Motion 2 complete" in line for line in logs))
 
+    def test_quick_playback_auto_finishes_without_e_or_extra_enter(self):
+        catalog = {"1": (pt("grab1", 1, 2111),)}
+        plan = cq.QueuePlan(catalog, ["1"])
+        statuses, motor = [], Motor()
+        class Port:
+            def closePort(self): statuses.append("closed")
+        result = cq.playback(catalog, plan, (450, 25),
+            connect=lambda: (Port(), motor),
+            read_all=lambda _: pt("seed", 1, 2000).target,
+            enable_all_torque=lambda _: statuses.append("enabled"),
+            disable_all_torque=lambda _: statuses.append("disabled"),
+            terminal_class=lambda: Terminal(lambda: None),
+            settings=SETTINGS, check_result=lambda *_: None,
+            report=lambda *_: None, sleep=lambda _: None,
+            finish_after_queue=True)
+        self.assertTrue(result)
+        self.assertEqual(motor.packets, 2)  # measured hold + the one waypoint
+        self.assertEqual([x[2:] for x in motor.commands[-5:]], [(450, 25)] * 4 + [(300, 20)])
+        self.assertIn("closed", statuses)
+        self.assertNotIn("disabled", statuses)
+
     def test_emergency_stop_releases(self):
         catalog={"1": (pt("m1",1),)}
         plan=cq.QueuePlan(catalog, ["1"])
