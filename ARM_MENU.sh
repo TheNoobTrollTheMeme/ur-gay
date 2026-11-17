@@ -11,6 +11,8 @@ Usage: arm [command] [arguments]
        menu                full arm launcher shortcut (works from any folder)
        arm                 interactive menu (works over SSH)
        arm 1..5            Kelvin arm Scripts 01..05 (5 supports @bookmarks)
+       arm 5d              Kelvin Script 5 DEBUG (global speed/accel)
+       arm 5d --speed 450 --accel 25
        arm 6               custom live grid / waypoint editor
        arm 7               read-only raw debug capture (torque OFF)
        arm board           terminal arm board / macro maker
@@ -206,6 +208,7 @@ dispatch() {
         3|03|angles|angle) run_script scripts/03_move_joint_angle.py "$@" ;;
         4|04|timestamp|timestamps) run_script scripts/04_timestamp_motion.py "$@" ;;
         5|05|waypoint|waypoints) run_script scripts/05_bookmark_compat.py "$@" ;;
+        5d|05d|debug5|waypoint-debug) run_script scripts/05_waypoint_debug.py "$@" ;;
         6|06|grid|script6|mine) run_script scripts/06_live_grid_tool.py "$@" ;;
         7|07|debug|capture) ask_torque_off && run_script scripts/07_raw_debug_capture.py "$@" ;;
         b|board|macro|macros) run_script scripts/arm_board.py --terminal "$@" ;;
@@ -247,6 +250,7 @@ menu() {
   3  Move using joint angles      B  Board / macro maker
   4  Timestamp motions            C  COMP pseudo-GUI + saved macros
   5  Waypoint record & playback   M  Tray / winning line remap
+     5D Script 5 global speed DEBUG
                                   W  Winning-line builder (old board)
                                   A  Full live square attack
                                   K  Old COMP with Joy-Con
