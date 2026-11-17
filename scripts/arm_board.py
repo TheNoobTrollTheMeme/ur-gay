@@ -447,12 +447,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, help="Path to the arm repo")
     parser.add_argument("--terminal", action="store_true", help="Use the keyboard-operated terminal board")
+    parser.add_argument("--queue", action="store_true",
+                        help="With --terminal, open the winning-line builder in queue preview mode")
     parser.add_argument("--remap", action="store_true",
                         help="Edit tray layout and winning-line pickups OFFLINE (no motor motion)")
     parser.add_argument("--turbo", action="store_true", help="Use the Competition Turbo profile with normal gripper speed")
     parser.add_argument("--speed", type=int, help="Custom arm speed 50..1200 (default 300)")
     parser.add_argument("--acceleration", type=int, help="Custom arm acceleration 1..60 (default 20)")
     args = parser.parse_args()
+    if args.queue and not args.terminal:
+        parser.error("--queue requires --terminal.")
     if args.turbo and (args.speed is not None or args.acceleration is not None):
         parser.error("Use either --turbo or --speed/--acceleration, not both.")
     if args.remap and (args.terminal or args.turbo or args.speed is not None or
@@ -499,6 +503,7 @@ def main():
                 speed_label=(f"{speed}/{acceleration}" if (speed, acceleration)
                              != (DEFAULT_SPEED, DEFAULT_ACCELERATION) else None),
                 tray_slots=load_mapping(motions)["slots"],
+                start_queue=args.queue,
             )
         except curses.error as error:
             parser.exit(1, f"Terminal board could not open: {error}\n")

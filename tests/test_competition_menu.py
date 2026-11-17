@@ -284,6 +284,86 @@ class VisibilityTests(unittest.TestCase):
         self.assertEqual(s.export_for_run(), before)
         self.assertEqual(s.hidden, set())
 
+    def test_old_builder_returns_to_comp_with_queue_and_new_line(self):
+        script = self.folder / "scripts" / "arm_board.py"
+        script.parent.mkdir()
+        script.write_text("# Stub; subprocess is mocked\n")
+        state = self.state
+        state.add_selected()
+        state.change_speed(500, 25)
+        new_name = "winning_line_c1r2_c2r2_c3r2"
+        fresh = data.CatalogSnapshot(
+            {**self.snapshot.catalog, "82": (cq.Point(new_name, 1, point()),)},
+            {**self.snapshot.labels, "82": new_name},
+            {**self.snapshot.aliases, new_name: "82"},
+            self.snapshot.unavailable, (), self.snapshot.folder)
+        editor = SimpleNamespace(connect=Mock(side_effect=AssertionError("motion")))
+        with ExitStack() as stack:
+            for fn in ("def_prog_mode", "endwin", "reset_prog_mode", "curs_set"):
+                stack.enter_context(patch.object(menu.curses, fn))
+            runner = stack.enter_context(patch.object(menu.subprocess, "run",
+                return_value=SimpleNamespace(returncode=0)))
+            stack.enter_context(patch.object(menu, "build_snapshot", return_value=fresh))
+            menu.open_board_tool(FakeScreen(), editor, state, "builder")
+        self.assertEqual(runner.call_args.args[0], [sys.executable, str(script),
+            "--repo", str(self.folder), "--terminal", "--queue", "--speed", "500",
+            "--acceleration", "25"])
+        self.assertEqual(state.queue, [WIN])
+        self.assertIn("82", state.shown)
+        self.assertTrue(state.winning_only)
+        self.assertFalse(self.preset_path.exists())
+        editor.connect.assert_not_called()
+
+    def test_pickup_mapping_uses_offline_tool_and_keeps_queue(self):
+        script = self.folder / "scripts" / "arm_board.py"
+        script.parent.mkdir()
+        script.write_text("# Stub; subprocess is mocked\n")
+        self.state.add_selected()
+        editor = SimpleNamespace(connect=Mock(side_effect=AssertionError("motion")))
+        with ExitStack() as stack:
+            for fn in ("def_prog_mode", "endwin", "reset_prog_mode", "curs_set"):
+                stack.enter_context(patch.object(menu.curses, fn))
+            runner = stack.enter_context(patch.object(menu.subprocess, "run",
+                return_value=SimpleNamespace(returncode=0)))
+            stack.enter_context(patch.object(menu, "build_snapshot", return_value=self.snapshot))
+            menu.open_board_tool(FakeScreen(), editor, self.state, "mapping")
+        self.assertEqual(runner.call_args.args[0], [sys.executable, str(script),
+            "--repo", str(self.folder), "--remap"])
+        self.assertEqual(self.state.queue, [WIN])
+        self.assertFalse(self.state.winning_only)
+        editor.connect.assert_not_called()
+
+    def test_failed_tool_launch_restores_terminal_and_preserves_queue(self):
+        script = self.folder / "scripts" / "arm_board.py"
+        script.parent.mkdir()
+        script.write_text("# Stub; subprocess is mocked\n")
+        self.state.add_selected()
+        with ExitStack() as stack:
+            for fn in ("def_prog_mode", "endwin", "curs_set"):
+                stack.enter_context(patch.object(menu.curses, fn))
+            restore = stack.enter_context(patch.object(menu.curses, "reset_prog_mode"))
+            stack.enter_context(patch.object(menu.subprocess, "run",
+                side_effect=OSError("Could not start child")))
+            with self.assertRaisesRegex(OSError, "Could not start"):
+                menu.open_board_tool(FakeScreen(), object(), self.state, "builder")
+        restore.assert_called_once()
+        self.assertEqual(self.state.queue, [WIN])
+
+    def test_comp_keys_open_existing_tools_without_running_queue(self):
+        screen = FakeScreen(keys=map(ord, "bmq"))
+        editor = SimpleNamespace(connect=Mock(side_effect=AssertionError("motion")))
+        with ExitStack() as stack:
+            for fn in ("curs_set", "start_color", "use_default_colors", "init_pair"):
+                stack.enter_context(patch.object(menu.curses, fn))
+            stack.enter_context(patch.object(menu, "build_snapshot", return_value=self.snapshot))
+            opener = stack.enter_context(patch.object(menu, "open_board_tool"))
+            result = menu.app(screen, editor, path=self.preset_path,
+                view_path=self.view_path, reference_path=self.reference_path)
+        self.assertIsNone(result)
+        self.assertEqual([call.args[-1] for call in opener.call_args_list],
+                         ["builder", "mapping"])
+        editor.connect.assert_not_called()
+
 
 class StorageTests(unittest.TestCase):
     def test_save_validation_and_backup(self):

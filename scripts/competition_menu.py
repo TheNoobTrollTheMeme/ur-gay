@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import curses
 from pathlib import Path
+import subprocess
+import sys
 import textwrap
 
 import competition_quick as quick
@@ -211,8 +213,8 @@ def draw(screen, state):
     name = state.labels[selected] if selected is not None else "(none)"
     put(screen, h-6, 2, "Selected: " + name, curses.A_DIM)
     bar(screen, h-4, 0, w)
-    put(screen, h-3, 1, "Tab pane | arrows/PgUp/PgDn | Home/End | Enter add | Del remove")
-    put(screen, h-2, 1, "H show/hide | A all | W lines | F speed | T tray | R run | ? help")
+    put(screen, h-3, 1, "Enter add | Tab pane | arrows/PgUp/PgDn | Del remove | R run")
+    put(screen, h-2, 1, "B build | M map | H show/hide | W lines | F speed | T ref | ? help")
     put(screen, h-1, 1, state.status)
     screen.refresh()
 
@@ -394,6 +396,47 @@ def tray_key(screen, state, key):
             state.discard_tray_reference()
 
 
+def open_board_tool(screen, editor, state, tool):
+    """Open the existing builder/remapper, then reload without losing the queue."""
+    root = Path(state.snapshot.folder).resolve().parent
+    script = root / "scripts" / "arm_board.py"
+    if not script.is_file():
+        raise ValueError("Old Board is missing. Run the one-click update to install it.")
+    command = [sys.executable, str(script), "--repo", str(root)]
+    if tool == "builder":
+        command += ["--terminal", "--queue", "--speed", str(state.speed),
+                    "--acceleration", str(state.accel)]
+    elif tool == "mapping":
+        command += ["--remap"]
+    else:
+        raise ValueError("Choose the winning-line builder or pickup mapping.")
+
+    # Restore normal terminal input before another curses UI or input() runs.
+    curses.def_prog_mode()
+    try:
+        curses.endwin()
+        result = subprocess.run(command, cwd=root, check=False)
+    finally:
+        curses.reset_prog_mode()
+        screen.keypad(True)
+        screen.erase()
+        screen.refresh()
+        try:
+            curses.curs_set(0)
+        except curses.error:
+            pass
+
+    state.refresh_catalog(build_snapshot(editor))
+    if tool == "builder":
+        state.winning_only = state.show_all = True
+        state.filter_text = ""
+        state.select.pane = state.select.motion = 0
+    label = "Winning-line builder" if tool == "builder" else "Pickup mapper"
+    state.status = (f"{label} closed; recordings refreshed, COMP queue retained."
+                    if result.returncode == 0 else
+                    f"{label} exited with status {result.returncode}; COMP queue retained.")
+
+
 def app(screen, editor, *, path=quick.PRESETS, start_tray=False,
         view_path=VIEW_PATH, reference_path=base.reference.REFERENCE_PATH):
     try:
@@ -445,6 +488,10 @@ def app(screen, editor, *, path=quick.PRESETS, start_tray=False,
                 state.toggle_all()
             elif key in (ord("w"), ord("W")):
                 state.toggle_winning_lines()
+            elif key in (ord("b"), ord("B")):
+                open_board_tool(screen, editor, state, "builder")
+            elif key in (ord("m"), ord("M")):
+                open_board_tool(screen, editor, state, "mapping")
             elif key == ord("/"):
                 value = prompt(screen, state, "Search", value=state.filter_text)
                 if value is not None:
@@ -503,6 +550,10 @@ def app(screen, editor, *, path=quick.PRESETS, start_tray=False,
             elif key == ord("?"):
                 message_panel(screen, "COMP MENU V2 CONTROLS", [
                     "Winning lines appear first. Enter adds the entire READY saved line.",
+                    "B: open the OLD board pseudo-GUI in queue/preview mode. G chooses a pickup; 1-9 adds its destination; W exports a new line. Q returns to COMP.",
+                    "M: open actual pickup mapping. 2 maps slot to grab sequence; 4 changes a saved line's pickups; 6 syncs existing lines. Q returns to COMP.",
+                    "After changing saved waypoint positions, use S in the old builder (queue mode), or mapper 6 then SYNC, to rebuild linked winning lines.",
+                    "T is a separate reference-only tray: all its fields are cosmetic. In actual mapping, zone/position are labels; block type and grab sequence affect plans.",
                     "H: checkbox show/hide menu. Space toggles, A shows matched, N hides matched, S saves.",
                     "A: temporarily show ALL entries; press again to return to your saved menu.",
                     "W: all winning lines, including hidden ones. / searches names.",

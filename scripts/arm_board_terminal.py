@@ -88,7 +88,7 @@ def draw(screen, cursor, mode, live, pickup, selecting, pending, status, activit
     screen.refresh()
 
 
-def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, sync_winning_lines, link_winning_line, turbo, speed_label=None, tray_slots=None):
+def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, sync_winning_lines, link_winning_line, turbo, speed_label=None, tray_slots=None, start_queue=False):
     try:
         curses.curs_set(0)
     except curses.error:
@@ -100,13 +100,13 @@ def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, 
     cursor = (0, 0)
     mode = "place"
     live = selecting = closing = False
-    queueing = False
+    queueing = bool(start_queue)
     placements = []
     pickup = None
     pending = None
     link_filename = None
     thread = None
-    status = "Ready"
+    status = "Queue ready" if queueing else "Ready"
     activity = deque(maxlen=60)
     requested_stop = Event()
     events = Queue()
@@ -300,11 +300,11 @@ def terminal_loop(screen, build_plan, play, compose_queue, export_winning_line, 
             thread.join()
 
 
-def run_terminal(build_plan, play, *, compose_queue, export_winning_line, sync_winning_lines, link_winning_line, turbo=False, speed_label=None, tray_slots=None):
+def run_terminal(build_plan, play, *, compose_queue, export_winning_line, sync_winning_lines, link_winning_line, turbo=False, speed_label=None, tray_slots=None, start_queue=False):
     try:
         curses.wrapper(
             terminal_loop, build_plan, play, compose_queue, export_winning_line,
-            sync_winning_lines, link_winning_line, turbo, speed_label, tray_slots,
+            sync_winning_lines, link_winning_line, turbo, speed_label, tray_slots, start_queue,
         )
     except KeyboardInterrupt:
         pass

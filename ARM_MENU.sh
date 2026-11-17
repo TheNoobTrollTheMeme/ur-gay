@@ -14,6 +14,7 @@ Usage: arm [command] [arguments]
        arm 6               custom live grid / waypoint editor
        arm 7               read-only raw debug capture (torque OFF)
        arm board           terminal arm board / macro maker
+       arm wins            Winning-line builder (old board), starts in preview
        arm comp            QUICK competition pseudo-GUI (also: comp)
        arm trayref         editable TRAY REFERENCE, no motion changes
        arm comp grab1 c1r1p --speed 500 --accel 25
@@ -208,6 +209,7 @@ dispatch() {
         6|06|grid|script6|mine) run_script scripts/06_live_grid_tool.py "$@" ;;
         7|07|debug|capture) ask_torque_off && run_script scripts/07_raw_debug_capture.py "$@" ;;
         b|board|macro|macros) run_script scripts/arm_board.py --terminal "$@" ;;
+        w|win|wins|winning) run_script scripts/arm_board.py --terminal --queue "$@" ;;
         c|competition|queue|comp|quick|macrosetter) run_script scripts/competition_quick.py "$@" ;;
         k|legacycomp|oldcomp) run_script6_function competition_placements ;;
         v|trayref|tray-reference|reftray) run_script scripts/competition_quick.py --tray "$@" ;;
@@ -245,6 +247,7 @@ menu() {
   3  Move using joint angles      B  Board / macro maker
   4  Timestamp motions            C  COMP pseudo-GUI + saved macros
   5  Waypoint record & playback   M  Tray / winning line remap
+                                  W  Winning-line builder (old board)
                                   A  Full live square attack
                                   K  Old COMP with Joy-Con
                                   V  Tray reference (view/edit)
