@@ -203,7 +203,9 @@ def execute(editor, actions, speed, accel, store, *, yes=False, dry_run=False,
     )
 
 
-def interactive(editor, *, path=PRESETS):
+def interactive(editor=None, *, path=PRESETS):
+    if editor is None:
+        editor = editor_module()
     store = load_store(path)
     speed, accel = store.get("speed", DEFAULT_SPEED), store.get("accel", DEFAULT_ACCEL)
     catalog, labels, aliases = catalog_for(editor)
