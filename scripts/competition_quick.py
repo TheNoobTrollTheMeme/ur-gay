@@ -2,7 +2,7 @@
 """Quick Competition Mode: named motion queues, reusable macros, one speed choice.
 
 Usage:
-    comp                           interactive macro-style editor
+    comp                           keyboard terminal pseudo-GUI (works over SSH)\n    comp --text                    fallback command-line editor
     comp grab1 c1r2                run two recorded motions, one RUN confirmation
     comp --preset opener           run a stored queue, one RUN confirmation
     comp --repeat                  replay most recently started queue
@@ -305,6 +305,34 @@ def interactive(editor=None, *, path=PRESETS):
             print(f"Not applied: {exc}")
 
 
+def launch(editor=None, *, path=PRESETS, force_text=False, force_tui=False):
+    """Use terminal pseudo-GUI by default; plain text fallback without TTY."""
+    if editor is None:
+        editor = editor_module()
+    is_terminal = (sys.stdin.isatty() and sys.stdout.isatty()
+                   and os.environ.get("TERM", "") not in ("", "dumb"))
+    if force_text:
+        return interactive(editor, path=path)
+    if not is_terminal:
+        if force_tui:
+            raise RuntimeError("Terminal pseudo-GUI requires a TTY (SSH with -t).")
+        print("No interactive terminal found; using plain COMP editor.")
+        return interactive(editor, path=path)
+    try:
+        import competition_tui
+        macro = competition_tui.launch(editor, path=path)
+    except (OSError, ImportError) as exc:
+        if force_tui:
+            raise
+        print(f"Terminal GUI unavailable ({exc}); falling back to text mode.")
+        return interactive(editor, path=path)
+    if macro is None:
+        print("Competition editor closed; no motor movement.")
+        return None
+    return execute(editor, macro["queue"], macro["speed"], macro["accel"],
+                   load_store(path), yes=True, path=path)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("motions", nargs="*", help="saved motion names/IDs, e.g. grab1 c1r1")
@@ -315,6 +343,9 @@ def main(argv=None):
     parser.add_argument("--dry-run", action="store_true", help="validate without motor connection")
     parser.add_argument("--list", action="store_true", help="list saved macros and recorded motions")
     parser.add_argument("--legacy", action="store_true", help="original dynamic queue/Joy-Con interface")
+    view = parser.add_mutually_exclusive_group()
+    view.add_argument("--tui", action="store_true", help="require full-screen SSH terminal pseudo-GUI")
+    view.add_argument("--text", action="store_true", help="use original typed quick editor")
     args = parser.parse_args(argv)
     if sum(bool(x) for x in (args.preset, args.repeat, bool(args.motions))) > 1:
         parser.error("Choose saved --preset, --repeat, OR direct motion names.")
@@ -328,7 +359,7 @@ def main(argv=None):
         print("Presets: " + (", ".join(sorted(store["presets"])) or "(none)"))
         return
     if not (args.motions or args.preset or args.repeat) and not args.dry_run:
-        return interactive(editor)
+        return launch(editor, force_text=args.text, force_tui=args.tui)
     if args.preset:
         try:
             macro = store["presets"][args.preset.lower()]
