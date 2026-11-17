@@ -21,6 +21,7 @@ class DeploymentManifestChecks(unittest.TestCase):
         self.assertIn("06_live_square_sweep.py", included)
         self.assertIn("competition_quick.py", included)
         self.assertIn("competition_tui.py", included)
+        self.assertIn("comp_tray_reference.py", included)
         self.assertIn("arm_board.py", included)
         self.assertIn("tray_remap.py", included)
         for name in included:
