@@ -98,6 +98,7 @@ fi
 scripts=(
     05_bookmark_compat.py
     06_live_grid_tool.py
+    06_live_square_sweep.py
     pose_bookmarks.py
     batch_paste_bookmark_joint.py
     competition_queue.py
