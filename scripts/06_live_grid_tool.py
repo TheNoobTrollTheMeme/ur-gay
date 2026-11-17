@@ -829,7 +829,7 @@ def main():
         parser.error('--auto, --dry-run, --speed and --acceleration require --sequence NAME')
     refresh_attacks()
     while True:
-        answer = input('\n1 Live record/replace/remove  2 Random squares  3 Attack square  4 Sync ALL attacks  5 Copy current values  6 Auto grid  7 Run saved sequence  8 Competition: all motions  Q Quit: ').strip().lower()
+        answer = input('\n1 Live record/replace/remove  2 Random squares  3 Attack square  4 Sync ALL attacks  5 Copy current values  6 Auto grid  7 Run saved sequence  8 Competition: all motions  9 Live square sweep  Q Quit: ').strip().lower()
         try:
             if answer == 'q':
                 return
@@ -848,6 +848,12 @@ def main():
                 test_grid(auto=True)
             elif answer == '8':
                 competition_placements()
+            elif answer == '9':
+                spec_sweep = importlib.util.spec_from_file_location(
+                    'arm_live_sweep', ROOT / 'scripts/06_live_square_sweep.py')
+                sweep = importlib.util.module_from_spec(spec_sweep)
+                spec_sweep.loader.exec_module(sweep)
+                sweep.menu()
             elif answer == '7':
                 routes = choose()
                 selected = input('Saved sequence number to run automatically, Q to cancel: ').strip().lower()
