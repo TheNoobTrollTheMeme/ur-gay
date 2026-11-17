@@ -16,6 +16,27 @@ import competition_quick as quick
 import comp_tray_reference as reference
 
 
+WINNING_LINE_NAME = re.compile(
+    r"winning_line_(c[1-3]r[1-3])_(c[1-3]r[1-3])_(c[1-3]r[1-3])(?:_(\d+))?",
+    re.I,
+)
+
+
+def is_winning_line(name):
+    """Classify an existing READY recording for display, never generate a route."""
+    return name.lower().startswith("winning_line_")
+
+
+def motion_label(name):
+    """Show all three cells on narrow terminals; retain the real filename in data."""
+    match = WINNING_LINE_NAME.fullmatch(name)
+    if match:
+        cells = ">".join(cell.upper() for cell in match.groups()[:3])
+        suffix = f" #{match.group(4)}" if match.group(4) else ""
+        return f"WIN {cells}{suffix}"
+    return name
+
+
 @dataclass
 class Selection:
     pane: int = 0  # 0 = available motions, 1 = staged queue
@@ -39,6 +60,7 @@ class CompetitionState:
         quick.validate_speed(self.speed, self.accel)
         self.select = Selection()
         self.filter_text = ""
+        self.winning_only = False
         self.status = "Ready. Choose a recording and press Enter to queue."
         self.active_macro = None
 
@@ -84,8 +106,25 @@ class CompetitionState:
 
     @property
     def shown(self):
-        return [n for n in sorted(self.catalog, key=int)
-                if self.filter_text.lower() in self.labels[n].lower()]
+        # Keep catalog IDs and canonical names unchanged. Only display order
+        # changes: saved winning lines are visible before individual motions.
+        ordered = sorted(self.catalog, key=lambda n: (
+            not is_winning_line(self.labels[n]), int(n)))
+        query = self.filter_text.lower()
+        return [n for n in ordered
+                if (not self.winning_only or is_winning_line(self.labels[n]))
+                and (query in self.labels[n].lower()
+                     or query in motion_label(self.labels[n]).lower())]
+
+    def toggle_winning_lines(self):
+        """W switches the left menu between all motions and winning lines only."""
+        self.winning_only = not self.winning_only
+        self.filter_text = ""
+        self.select.pane = 0
+        self.select.motion = 0
+        self.status = ("Winning lines only. Enter queues the WHOLE saved line; W shows all."
+                       if self.winning_only else
+                       "All READY motions. Winning lines are listed first.")
 
     def _validated(self, items):
         _, names = quick.resolve_queue(items, self.catalog, self.labels, self.aliases)
@@ -186,7 +225,37 @@ class CompetitionState:
         self.filter_text = text.strip()
         self.select.motion = 0
         self.status = (f"Filter: {self.filter_text}" if self.filter_text
-                       else "Showing all READY motions.")
+                       else ("Showing READY winning lines." if self.winning_only
+                             else "Showing all READY motions, winning lines first."))
+
+
+def motion_menu_rows(state):
+    """Section headings are display-only, not selectable queue entries."""
+    visible = state.shown
+    wins = [n for n in visible if is_winning_line(state.labels[n])]
+    ordinary = [n for n in visible if not is_winning_line(state.labels[n])]
+    result = [(None, f"WINNING LINES ({len(wins)})")]
+    result.extend((n, motion_label(state.labels[n])) for n in wins)
+    if not wins:
+        result.append((None, "(no matching READY lines)"))
+    if not state.winning_only:
+        result.append((None, f"OTHER MOTIONS ({len(ordinary)})"))
+        result.extend((n, state.labels[n]) for n in ordinary)
+        if not ordinary:
+            result.append((None, "(no matching READY motions)"))
+    return result
+
+
+def motion_menu_window(state, height):
+    """Scroll headings with the list while always keeping the selection visible."""
+    rows = motion_menu_rows(state)
+    visible = state.shown
+    selected = (visible[min(state.select.motion, len(visible)-1)]
+                if visible else None)
+    at = next((i for i, (n, _) in enumerate(rows)
+               if n is not None and n == selected), 0)
+    start = max(0, at - max(1, height) + 1)
+    return rows[start:start + max(1, height)], selected
 
 
 def put(screen, y, x, text, attr=0, width=None):
@@ -236,26 +305,30 @@ def draw(screen, state):
     for y in range(3, h-5):
         put(screen, y, split, "|")
 
-    left_header = "[ MOTIONS ]" if state.select.pane == 0 else "  MOTIONS  "
+    left_title = "WINNING LINES" if state.winning_only else "MOTIONS + WIN LINES"
+    left_header = f"[ {left_title} ]" if state.select.pane == 0 else f"  {left_title}  "
     right_header = "[ QUEUE / MACRO ]" if state.select.pane == 1 else "  QUEUE / MACRO  "
     put(screen, 3, 2, left_header, title_attr if state.select.pane == 0 else curses.A_BOLD)
     put(screen, 3, split+2, right_header, title_attr if state.select.pane == 1 else curses.A_BOLD)
 
-    visible = state.shown
-    selected = min(state.select.motion, max(0, len(visible)-1))
-    start = min(max(0, selected-rows+1), max(0, len(visible)-rows))
-    for i, identifier in enumerate(visible[start:start+rows], start=start):
-        focused = state.select.pane == 0 and i == selected
+    menu_rows, selected = motion_menu_window(state, rows)
+    for i, (identifier, label_text) in enumerate(menu_rows):
+        if identifier is None:
+            put(screen, pane_top+i, 2, label_text, curses.A_BOLD, width=split-4)
+            continue
+        focused = state.select.pane == 0 and identifier == selected
         prefix = ">" if focused else " "
-        name = state.labels[identifier]
-        line = f"{prefix} {identifier:>3}  {name:<21} [{len(state.catalog[identifier])} pts]"
-        put(screen, pane_top+(i-start), 2, line,
-            curses.A_REVERSE | curses.A_BOLD if focused else 0,
-            width=split-4)
-    if not visible:
-        put(screen, pane_top, 2, "(no matching READY motions)")
+        line = f"{prefix} {identifier:>3} {label_text} [{len(state.catalog[identifier])}]"
+        put(screen, pane_top+i, 2, line,
+            curses.A_REVERSE | curses.A_BOLD if focused else 0, width=split-4)
+    detail = "W: all motions" if state.winning_only else "W: winning lines only"
     if state.filter_text:
-        put(screen, h-5, 2, "Filter: " + state.filter_text, curses.A_DIM, width=split-4)
+        detail = "Filter: " + state.filter_text
+    put(screen, h-5, 2, detail, curses.A_DIM, width=split-4)
+    # Long filenames need not obscure the three board cells in the left list.
+    # Their exact name is still visible here and remains the queue's identity.
+    if state.select.pane == 0 and selected is not None:
+        put(screen, h-6, 2, "Selected: " + state.labels[selected], curses.A_DIM)
 
     if not state.queue:
         put(screen, pane_top, split+2, "(empty) Enter on a motion to add it.")
@@ -273,7 +346,7 @@ def draw(screen, state):
         f"{len(state.queue)} queued | preset: {state.active_macro or '(unsaved)'}",
         curses.A_BOLD, width=w-split-4)
     bar(screen, h-4, 0, w, "-")
-    put(screen, h-3, 1, "TAB pane | arrows select | ENTER add | DEL remove | [/] reorder | / search")
+    put(screen, h-3, 1, "TAB pane | arrows | ENTER add | DEL remove | W win lines | / search")
     put(screen, h-2, 1, "S save | O open | F speed | T tray ref | R RUN | V preview | ? help | Q quit")
     put(screen, h-1, 1, state.status,
         warn_attr if ("NOT" in state.status or "Error" in state.status
@@ -458,6 +531,7 @@ def help_overlay(screen, state):
         "[ / ] (right): move a queued action earlier/later",
         "S: name and SAVE reusable macro  |  O: OPEN macro",
         "F: set ARM speed once (gripper stays at 300/20)",
+        "W: winning lines only / all motions (lines always appear first)",
         "/: filter by motion name  |  V: preview waypoint count",
         "G: refresh local motion catalog  |  C: clear queue",
         "T: visual six-slot tray reference (NEVER affects motor commands)",
@@ -572,6 +646,8 @@ def app(screen, editor, *, path=quick.PRESETS,
                 state.reorder(-1)
             elif key in (ord("]"), ord("}")) and state.select.pane == 1:
                 state.reorder(1)
+            elif key in (ord("w"), ord("W")):
+                state.toggle_winning_lines()
             elif key in (ord("/"),):
                 value = prompt(screen, state, "Search", value=state.filter_text)
                 if value is not None:
