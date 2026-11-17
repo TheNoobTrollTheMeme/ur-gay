@@ -242,30 +242,91 @@ def run(editor, motions=MOTIONS, *, continuous=False):
             port.closePort()
 
 
+def audit_existing(editor, motions=MOTIONS):
+    """READ-ONLY audit of actual c#r#p recordings; no path is executed.
+
+    Shows what would happen if software jumped directly between final square
+    poses. Large tick jumps are suspicious but small ones DO NOT prove clearance.
+    """
+    print("EXISTING SQUARE-PLACEMENT ROUTE AUDIT (no hardware connection)")
+    print("Checks live local c#r#p.json paths, not the new live_c#r# teaching routes.")
+    endpoints = {}
+    flagged = 0
+    for cell in ORDER:
+        path = motions / f"{cell}p.json"
+        if not path.is_file():
+            print(f"  {cell.upper()}: MISSING {path.name}")
+            flagged += 1
+            continue
+        try:
+            description = str(json.loads(path.read_text(encoding="utf-8")).get("description", ""))
+            _, poses = editor.wp.load_sequence(path)
+            if not poses:
+                raise ValueError("empty route")
+            for point in poses:
+                editor.validate_competition_target(point)
+            largest = max(
+                (max_arm_delta(editor, a, b) for a, b in zip(poses, poses[1:])),
+                default=0,
+            )
+            warning = " [LARGE IN-ROUTE JUMP]" if largest > MAX_JOINT_STEP else ""
+            if any(word in description.upper() for word in
+                   ("SIMULATION", "NOT CLEARED", "UNVERIFIED")):
+                warning += " [NOT VERIFIED FOR HARDWARE]"
+            if warning:
+                flagged += 1
+            print(f"  {cell.upper()}: {len(poses)} poses; largest joint step "
+                  f"{largest} ticks{warning}")
+            endpoints[cell] = poses[-1]
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+            print(f"  {cell.upper()}: INVALID: {exc}")
+            flagged += 1
+
+    links = 0
+    for start, end in zip(ROUND_TRIP, ROUND_TRIP[1:]):
+        if start in endpoints and end in endpoints:
+            delta = max_arm_delta(editor, endpoints[start], endpoints[end])
+            if delta > MAX_JOINT_STEP:
+                links += 1
+                print(f"  DIRECT {start.upper()} -> {end.upper()}: {delta} ticks "
+                      "[LARGE UNPLANNED JOINT JUMP]")
+    print(f"Flagged square recordings: {flagged}/9; "
+          f"large direct-endpoint transitions: {links}.")
+    print("These jumps are HYPOTHETICAL if software moves endpoint-to-endpoint. "
+          "No measured ceiling height, collision model or physical path verification exists.")
+    return {"flagged_routes": flagged, "large_direct_links": links,
+            "square_count": len(endpoints)}
+
+
 def menu():
     editor = load_editor()
-    print("\nLIVE 9-square test: I make teaching templates, P dry-run, R guided run, Q back")
+    print("\nLIVE 9-square test: A audit existing places, I templates, P preview, R guided run, Q back")
     choice = input("sweep> ").strip().lower()
-    if choice == "i":
+    if choice == "a":
+        audit_existing(editor)
+    elif choice == "i":
         initialize_routes(editor)
     elif choice == "p":
         preview(editor)
     elif choice == "r":
         run(editor)
     elif choice != "q":
-        print("Choose I, P, R, or Q.")
+        print("Choose A, I, P, R, or Q.")
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--audit", action="store_true", help="audit existing c#r#p routes, never move arm")
     mode.add_argument("--init", action="store_true", help="create safe teaching templates (no movement)")
     mode.add_argument("--run", action="store_true", help="guided physical test, Enter per waypoint")
     mode.add_argument("--continuous", action="store_true",
                       help="continuous physical test after separate confirmation; use only after guided test")
     args = parser.parse_args(argv)
     editor = load_editor()
-    if args.init:
+    if args.audit:
+        audit_existing(editor)
+    elif args.init:
         initialize_routes(editor)
     elif args.run or args.continuous:
         run(editor, continuous=args.continuous)
