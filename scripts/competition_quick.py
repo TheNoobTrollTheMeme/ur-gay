@@ -33,6 +33,7 @@ PRESETS = ROOT / "motions" / "_competition_presets.json"
 NAME = re.compile(r"^[a-z][a-z0-9_-]{0,39}$")
 DEFAULT_SPEED = 300
 DEFAULT_ACCEL = 20
+SLOT_ALIAS = re.compile(r"^slot([1-6])$", re.I)
 
 
 def editor_module():
@@ -113,18 +114,50 @@ def catalog_for(editor, *, report=print):
         bookmarks=list_bookmarks(editor.BOOKMARK_FILE, editor.settings.JOINT_NAMES))
 
 
-def resolve_queue(actions, catalog, labels, aliases):
-    """Re-resolve all names (or IDs supplied at the prompt) atomically."""
+def resolve_queue(actions, catalog, labels, aliases, *, tray_mapping=None,
+                  motions_folder=None):
+    """Resolve live motion names and symbolic tray slot pickups at run time.
+
+    'slot3' means "current grab recording assigned to physical slot 3".
+    Saving the symbolic slot, not today's grab filename, keeps macros linked
+    to editable tray arrangements without silently rewriting recordings.
+    """
     if not actions:
         raise ValueError("Queue empty. Add a recording or load a macro.")
     if len(actions) > 150:
         raise ValueError("At most 150 queued motions per macro.")
     plan_cls = __import__("competition_queue").QueuePlan
     plan = plan_cls(catalog, aliases=aliases, labels=labels)
+    names = []
+    used_slots = set()
+    current_mapping = tray_mapping
     for action in actions:
-        plan.append(action)
-    names = tuple(plan.name(identifier) for identifier in plan.pending)
-    return plan, names
+        chosen = str(action).strip().lower()
+        match = SLOT_ALIAS.fullmatch(chosen)
+        if match:
+            from tray_mapping import get_slot, load_mapping, validate_mapping
+            if current_mapping is None:
+                current_mapping = load_mapping(motions_folder or ROOT / "motions")
+            validate_mapping(current_mapping)
+            number = int(match.group(1))
+            if number in used_slots:
+                raise ValueError(f"Slot {number} is already queued: one block cannot "
+                                 "be grabbed twice without restocking.")
+            slot = get_slot(current_mapping, number)
+            if slot["block"] == "empty":
+                raise ValueError(f"Slot {number} is empty. Edit the tray layout.")
+            grab = slot["grab"].lower()
+            try:
+                plan.append(grab)
+            except ValueError as exc:
+                raise ValueError(f"Slot {number} grab motion {grab!r} is NOT READY. "
+                                 "Record/validate that motion first.") from exc
+            used_slots.add(number)
+            names.append(f"slot{number}")
+        else:
+            plan.append(chosen)
+            names.append(plan.name(plan.pending[-1]))
+    return plan, tuple(names)
 
 
 def show_catalog(catalog, labels, *, limit=30, report=print):
@@ -169,6 +202,9 @@ def remember_last(store, names, speed, accel, *, path=PRESETS):
 def preview(names, speed, accel, plan, *, report=print):
     show_queue(names, speed, accel, report=report)
     report(f"Total: {sum(len(plan.catalog[ident]) for ident in plan.pending)} waypoints.")
+    for identifier, name in zip(plan.pending, names):
+        if SLOT_ALIAS.fullmatch(name):
+            report(f"  {name} -> LIVE {plan.name(identifier)} (current tray mapping)")
     report("Each motion is prevalidated from local files; no automatic clearance planner.")
     report("During motion: SPACE/Q/Esc stops; terminal motor position is monitored.")
 
@@ -178,7 +214,8 @@ def execute(editor, actions, speed, accel, store, *, yes=False, dry_run=False,
     validate_speed(speed, accel)  # Fail before any motor connection.
     # IMPORTANT: build a fresh catalog so macro links point to current saved poses.
     catalog, labels, aliases = catalog_for(editor, report=report)
-    plan, names = resolve_queue(actions, catalog, labels, aliases)
+    plan, names = resolve_queue(actions, catalog, labels, aliases,
+                                motions_folder=getattr(editor, "folder", ROOT / "motions"))
     preview(names, speed, accel, plan, report=report)
     if dry_run:
         report("DRY RUN: no motor connection, no movement, no preset change.")
@@ -305,22 +342,24 @@ def interactive(editor=None, *, path=PRESETS):
             print(f"Not applied: {exc}")
 
 
-def launch(editor=None, *, path=PRESETS, force_text=False, force_tui=False):
+def launch(editor=None, *, path=PRESETS, force_text=False, force_tui=False, initial_tray=False):
     """Use terminal pseudo-GUI by default; plain text fallback without TTY."""
     if editor is None:
         editor = editor_module()
     is_terminal = (sys.stdin.isatty() and sys.stdout.isatty()
                    and os.environ.get("TERM", "") not in ("", "dumb"))
     if force_text:
+        if initial_tray:
+            raise ValueError("Tray pseudo-GUI requires an interactive terminal.")
         return interactive(editor, path=path)
     if not is_terminal:
-        if force_tui:
-            raise RuntimeError("Terminal pseudo-GUI requires a TTY (SSH with -t).")
+        if force_tui or initial_tray:
+            raise RuntimeError("Tray pseudo-GUI requires an interactive TTY (SSH with -t).")
         print("No interactive terminal found; using plain COMP editor.")
         return interactive(editor, path=path)
     try:
         import competition_tui
-        macro = competition_tui.launch(editor, path=path)
+        macro = competition_tui.launch(editor, path=path, start_tray=initial_tray)
     except (OSError, ImportError) as exc:
         if force_tui:
             raise
@@ -346,6 +385,7 @@ def main(argv=None):
     view = parser.add_mutually_exclusive_group()
     view.add_argument("--tui", action="store_true", help="require full-screen SSH terminal pseudo-GUI")
     view.add_argument("--text", action="store_true", help="use original typed quick editor")
+    parser.add_argument("--tray", action="store_true", help="open the editable 6-slot tray screen first")
     args = parser.parse_args(argv)
     if sum(bool(x) for x in (args.preset, args.repeat, bool(args.motions))) > 1:
         parser.error("Choose saved --preset, --repeat, OR direct motion names.")
@@ -358,8 +398,11 @@ def main(argv=None):
         show_catalog(catalog, labels, limit=None)
         print("Presets: " + (", ".join(sorted(store["presets"])) or "(none)"))
         return
+    if args.tray and (args.motions or args.preset or args.repeat or args.dry_run or args.text):
+        parser.error("--tray is for the interactive pseudo-GUI only.")
     if not (args.motions or args.preset or args.repeat) and not args.dry_run:
-        return launch(editor, force_text=args.text, force_tui=args.tui)
+        return launch(editor, force_text=args.text, force_tui=args.tui,
+                      initial_tray=args.tray)
     if args.preset:
         try:
             macro = store["presets"][args.preset.lower()]
